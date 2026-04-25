@@ -1,0 +1,34 @@
+# ====================================================================
+# Dockerfile - Pieuvre API (Node.js)
+# ====================================================================
+
+FROM node:18-alpine
+
+# Label
+LABEL maintainer="Toussaint Garinat"
+LABEL description="Pieuvre Auto - API Backend"
+
+# Working directory
+WORKDIR /app
+
+# Copy package files
+COPY pieuvre-api/package*.json ./
+
+# Install dependencies
+RUN npm install --production
+
+# Copy source code
+COPY pieuvre-api/ ./
+
+# Create logs directory
+RUN mkdir -p /app/logs
+
+# Expose port
+EXPOSE 3001
+
+# Environment variables
+ENV NODE_ENV=production
+ENV PORT=3001
+
+# Start command
+CMD ["node", "server.js"]

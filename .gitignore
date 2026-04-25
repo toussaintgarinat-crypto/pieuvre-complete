@@ -1,0 +1,32 @@
+# Node
+node_modules/
+npm-debug.log
+*.log
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Build
+dist/
+build/
+.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes
+postgres_data/
+
+# C# build outputs
+pieuvre-autocad-plugin/bin/
+pieuvre-autocad-plugin/obj/
+pieuvre-autocad-plugin/packages/
+*.user

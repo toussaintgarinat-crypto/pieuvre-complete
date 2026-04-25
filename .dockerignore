@@ -1,0 +1,43 @@
+# ====================================================================
+# .dockerignore - Fichiers à exclure du build Docker
+# ====================================================================
+
+# Node
+node_modules
+**/node_modules
+pieuvre-api/node_modules
+pieuvre-frontend/node_modules
+npm-debug.log
+*.log
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs
+*.md
+!README.md
+
+# Git
+.git
+.gitignore
+
+# Build
+dist
+.next
+build
+
+# Test
+coverage
+.nyc_output
+
+# Misc
+*.env
+.env.local
+.env.*.local

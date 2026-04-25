@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Étiquettes Pieuvre Auto - Demo</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0f0f0;
+      padding: 20px;
+    }
+    h1 {
+      text-align: center;
+      color: #333;
+      margin-bottom: 10px;
+    }
+    .subtitle {
+      text-align: center;
+      color: #666;
+      margin-bottom: 30px;
+    }
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+    .print-area {
+      background: white;
+      padding: 20px;
+      border-radius: 8px;
+      box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+    }
+    .etiquette {
+      width: 70mm;
+      height: 35mm;
+      border: 1px solid #999;
+      border-radius: 3px;
+      padding: 2mm;
+      display: inline-block;
+      margin: 2mm;
+      position: relative;
+      background: #fff;
+      font-size: 8px;
+      overflow: hidden;
+    }
+    .etiquette.pr { background: #E3F2FD; border-color: #1976D2; }
+    .etiquette.lum { background: #FFF9C4; border-color: #FBC02D; }
+    .etiquette.vr { background: #CFD8DC; border-color: #455A64; }
+    .etiquette.vmc { background: #B2EBF2; border-color: #00838F; }
+    
+    .etiquette .header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 6px;
+      color: #555;
+      border-bottom: 0.5px solid #999;
+      padding-bottom: 1px;
+    }
+    .etiquette .gaine-name {
+      text-align: center;
+      font-size: 11px;
+      font-weight: bold;
+      padding: 2px 0;
+      border-bottom: 0.5px solid #999;
+      color: #000;
+    }
+    .etiquette .fils {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-end;
+      font-size: 7px;
+      padding: 2px 0;
+      min-height: 12mm;
+    }
+    .etiquette .fil {
+      color: #333;
+    }
+    .etiquette .fil.substituted {
+      color: #E65100;
+      font-weight: bold;
+    }
+    .etiquette .gaine-4x {
+      text-align: center;
+      font-size: 6px;
+      font-weight: bold;
+      border-top: 0.5px solid #999;
+      padding: 1px 0;
+      color: #000;
+    }
+    .etiquette .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding-top: 2px;
+    }
+    .etiquette .longueur {
+      font-size: 9px;
+      font-weight: bold;
+      color: #1565C0;
+    }
+    .etiquette .longueur small {
+      font-size: 6px;
+      font-weight: normal;
+      color: #666;
+    }
+    .etiquette .icta {
+      font-size: 8px;
+      font-weight: bold;
+      color: #1565C0;
+    }
+    .etiquette .client {
+      font-size: 5px;
+      color: #666;
+    }
+    
+    .page-break {
+      page-break-after: always;
+      border-bottom: 2px dashed #ccc;
+      margin: 20px 0;
+      padding-bottom: 20px;
+    }
+    .legend {
+      margin-top: 30px;
+      padding: 15px;
+      background: #f5f5f5;
+      border-radius: 5px;
+    }
+    .legend h3 { margin-bottom: 10px; }
+    .legend-item {
+      display: inline-block;
+      margin-right: 20px;
+      font-size: 12px;
+    }
+    .legend-color {
+      display: inline-block;
+      width: 15px;
+      height: 15px;
+      border-radius: 3px;
+      vertical-align: middle;
+      margin-right: 5px;
+    }
+    
+    @media print {
+      body { background: white; padding: 0; }
+      .print-area { box-shadow: none; padding: 10px; }
+      .no-print { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>🏷️ Étiquettes de Gaines</h1>
+    <p class="subtitle">Maison Test - Résidence Test - Lot 1 | Calcul #1 | 24/04/2026</p>
+    
+    <div class="print-area">
+      <!-- Page 1: ÉCLAIRAGE -->
+      <h2 style="font-size: 14px; margin-bottom: 10px; color: #FBC02D;">💡 ÉCLAIRAGE</h2>
+      
+      <div class="etiquette lum">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Lg1 Bx1</span>
+        </div>
+        <div class="gaine-name">L-1</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil">Bleu 1.5mm²</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">L-1 | L-1 | L-1 | L-1</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">8.5m <small>/ 7.7m</small></div>
+          <div class="icta">ICTA Ø16</div>
+        </div>
+      </div>
+      
+      <div class="etiquette lum">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Lg2 Bx2</span>
+        </div>
+        <div class="gaine-name">L-2</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil">Bleu 1.5mm²</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">L-2 | L-2 | L-2 | L-2</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">12.3m <small>/ 11.2m</small></div>
+          <div class="icta">ICTA Ø16</div>
+        </div>
+      </div>
+      
+      <div class="etiquette lum">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Lg3 Bx3</span>
+        </div>
+        <div class="gaine-name">L-3</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil">Bleu 1.5mm²</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">L-3 | L-3 | L-3 | L-3</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">15.7m <small>/ 14.3m</small></div>
+          <div class="icta">ICTA Ø16</div>
+        </div>
+      </div>
+      
+      <div class="etiquette lum">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E1 Bx4</span>
+        </div>
+        <div class="gaine-name">L-4</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil">Bleu 1.5mm²</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">L-4 | L-4 | L-4 | L-4</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">9.2m <small>/ 8.4m</small></div>
+          <div class="icta">ICTA Ø16</div>
+        </div>
+      </div>
+      
+      <div class="page-break"></div>
+      
+      <!-- Page 2: PRISES -->
+      <h2 style="font-size: 14px; margin-bottom: 10px; color: #1976D2;">🔌 PRISES 16A</h2>
+      
+      <div class="etiquette pr">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Lg1 Bx5</span>
+        </div>
+        <div class="gaine-name">P-1</div>
+        <div class="fils">
+          <span class="fil">Rouge 2.5mm²</span>
+          <span class="fil">Bleu 2.5mm²</span>
+          <span class="fil">V/J 2.5mm²</span>
+        </div>
+        <div class="gaine-4x">P-1 | P-1 | P-1 | P-1</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">25.5m <small>/ 23.2m</small></div>
+          <div class="icta">ICTA Ø20</div>
+        </div>
+      </div>
+      
+      <div class="etiquette pr">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Lg2 Bx6</span>
+        </div>
+        <div class="gaine-name">P-2</div>
+        <div class="fils">
+          <span class="fil">Rouge 2.5mm²</span>
+          <span class="fil">Bleu 2.5mm²</span>
+          <span class="fil">V/J 2.5mm²</span>
+        </div>
+        <div class="gaine-4x">P-2 | P-2 | P-2 | P-2</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">32.8m <small>/ 29.8m</small></div>
+          <div class="icta">ICTA Ø20</div>
+        </div>
+      </div>
+      
+      <div class="page-break"></div>
+      
+      <!-- Page 3: VOLETS ROULANTS -->
+      <h2 style="font-size: 14px; margin-bottom: 10px; color: #455A64;">🪟 VOLETS ROULANTS</h2>
+      
+      <div class="etiquette vr">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Lg1 Bx7</span>
+        </div>
+        <div class="gaine-name">VR-1</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil substituted">Orange 1.5mm² ⚠️</span>
+          <span class="fil substituted">Orange 1.5mm² ⚠️</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">VR-1 | VR-1 | VR-1 | VR-1</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">7.5m <small>/ 6.8m</small></div>
+          <div class="icta">ICTA Ø16</div>
+        </div>
+      </div>
+      
+      <div class="etiquette vr">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Lg2 Bx8</span>
+        </div>
+        <div class="gaine-name">VR-2</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil substituted">Orange 1.5mm² ⚠️</span>
+          <span class="fil substituted">Orange 1.5mm² ⚠️</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">VR-2 | VR-2 | VR-2 | VR-2</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">8.2m <small>/ 7.5m</small></div>
+          <div class="icta">ICTA Ø16</div>
+        </div>
+      </div>
+      
+      <div class="etiquette vr">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E1 Bx9</span>
+        </div>
+        <div class="gaine-name">VR-3</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil substituted">Orange 1.5mm² ⚠️</span>
+          <span class="fil substituted">Orange 1.5mm² ⚠️</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">VR-3 | VR-3 | VR-3 | VR-3</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">6.9m <small>/ 6.3m</small></div>
+          <div class="icta">ICTA Ø16</div>
+        </div>
+      </div>
+      
+      <div class="page-break"></div>
+      
+      <!-- Page 4: VMC -->
+      <h2 style="font-size: 14px; margin-bottom: 10px; color: #00838F;">💨 VMC</h2>
+      
+      <div class="etiquette vmc">
+        <div class="header">
+          <span>Maison T</span>
+          <span>Bt1 E0 Bx10</span>
+        </div>
+        <div class="gaine-name">VMC-1</div>
+        <div class="fils">
+          <span class="fil">Rouge 1.5mm²</span>
+          <span class="fil">Bleu 1.5mm²</span>
+          <span class="fil">V/J 1.5mm²</span>
+        </div>
+        <div class="gaine-4x">VMC-1 | VMC-1 | VMC-1 | VMC-1</div>
+        <div class="footer">
+          <div>
+            <div class="client">BOUYGUES</div>
+          </div>
+          <div class="longueur">18.5m <small>/ 16.8m</small></div>
+          <div class="icta">ICTA Ø20</div>
+        </div>
+      </div>
+      
+      <div class="legend">
+        <h3>📋 Légende</h3>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #FFF9C4; border: 1px solid #FBC02D;"></span>
+          Éclairage
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #E3F2FD; border: 1px solid #1976D2;"></span>
+          Prises
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #CFD8DC; border: 1px solid #455A64;"></span>
+          Volets Roulants
+        </div>
+        <div class="legend-item">
+          <span class="legend-color" style="background: #B2EBF2; border: 1px solid #00838F;"></span>
+          VMC
+        </div>
+        <div class="legend-item" style="color: #E65100;">
+          ⚠️ = Couleur substituée (stock insuffisant)
+        </div>
+      </div>
+      
+      <div style="margin-top: 20px; text-align: center;" class="no-print">
+        <button onclick="window.print()" style="padding: 10px 20px; font-size: 14px; cursor: pointer;">
+          🖨️ Imprimer les étiquettes
+        </button>
+        <p style="margin-top: 10px; color: #666; font-size: 12px;">
+          Format: 70mm × 35mm | 3 étiquettes par ligne | Compatible Avery L7160
+        </p>
+      </div>
+    </div>
+  </div>
+</body>
+</html>
