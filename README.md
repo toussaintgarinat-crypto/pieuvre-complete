@@ -35,7 +35,7 @@ Calcul automatique des bons de coupe (fils + gaines), gestion du stock, suivi de
 ## Prérequis
 
 - **Docker Desktop** (Mac, Windows ou Linux) → https://www.docker.com/products/docker-desktop/
-- Pour compiler le plugin AutoCAD : Windows + Visual Studio + AutoCAD 2024
+- Pour compiler le plugin AutoCAD : Windows + Visual Studio (ou Build Tools) + AutoCAD **2023, 2024 ou 2025**
 
 ---
 
@@ -78,19 +78,54 @@ docker compose down
 
 ## Plugin AutoCAD
 
-### Compilation (nécessite Windows + Visual Studio + AutoCAD 2024)
+### Compilation (AutoCAD 2023, 2024 ou 2025)
 
-1. Ouvrir `pieuvre-autocad-plugin/PieuvrePlugin.csproj` dans Visual Studio
+Le projet détecte automatiquement la version d'AutoCAD installée — aucun chemin à modifier à la main.
+
+**Option A — Script PowerShell (recommandé)**
+
+```powershell
+cd pieuvre-autocad-plugin
+
+# Détection automatique (demande si plusieurs versions installées)
+.\build.ps1
+
+# Forcer une version précise
+.\build.ps1 -Version 2023
+.\build.ps1 -Version 2024
+.\build.ps1 -Version 2025
+
+# Compiler pour toutes les versions installées
+.\build.ps1 -Version all
+```
+
+Le script trouve MSBuild automatiquement et produit un `.dll` par version dans :
+```
+bin\Release\AutoCAD2023\PieuvreAutoCAD.dll
+bin\Release\AutoCAD2024\PieuvreAutoCAD.dll
+bin\Release\AutoCAD2025\PieuvreAutoCAD.dll
+```
+
+**Option B — Visual Studio**
+
+1. Ouvrir `pieuvre-autocad-plugin/PieuvrePlugin.csproj`
 2. Restaurer les packages NuGet (`Newtonsoft.Json`)
-3. Vérifier que les chemins AutoCAD dans le `.csproj` correspondent à votre installation :
-   ```
-   C:\Program Files\Autodesk\AutoCAD 2024\acdbmgd.dll
-   C:\Program Files\Autodesk\AutoCAD 2024\acmgd.dll
-   C:\Program Files\Autodesk\AutoCAD 2024\AcCui.dll
-   ```
-4. Build → Release → `bin\Release\PieuvreAutoCAD.dll`
+3. Build → Release
 
-> Pour une autre version d'AutoCAD, modifier les `HintPath` dans le `.csproj`.
+Le `.csproj` cherche automatiquement AutoCAD 2023, puis 2024, puis 2025.  
+Pour forcer une version : `msbuild /p:AutoCADPath="C:\Program Files\Autodesk\AutoCAD 2025"`  
+Ou via variable d'environnement : `AUTOCAD_PATH=C:\Program Files\Autodesk\AutoCAD 2025`
+
+**Compatibilité des versions**
+
+| Version AutoCAD | DLL de compilation | DLL fournie au runtime | Compatibilité |
+|---|---|---|---|
+| 2023 | `AutoCAD 2023\acdbmgd.dll` | AutoCAD 2023 | ✅ |
+| 2024 | `AutoCAD 2024\acdbmgd.dll` | AutoCAD 2024 | ✅ |
+| 2025 | `AutoCAD 2025\acdbmgd.dll` | AutoCAD 2025 | ✅ |
+| LT (toutes) | — | — | ❌ (AutoCAD LT ne supporte pas NETLOAD) |
+
+> Le plugin affiche la version d'AutoCAD détectée au chargement (`PIEUVREINFO` pour vérifier).
 
 ### Installation dans AutoCAD
 
@@ -209,11 +244,12 @@ pieuvre-complete/
 │   └── schema.sql              ← Schéma PostgreSQL + données initiales
 │
 └── pieuvre-autocad-plugin/     ← Plugin AutoCAD C# (.NET 4.8)
-    ├── PieuvrePlugin.csproj
+    ├── PieuvrePlugin.csproj    ← Auto-détecte AutoCAD 2023/2024/2025
+    ├── build.ps1               ← Script de compilation multi-versions
     ├── PluginMain.cs           ← Commandes PIEUVRE, PIEUVRESTOCK...
     ├── Core/
     │   ├── ApiClient.cs        ← Appels HTTP vers l'API
-    │   └── Configuration.cs    ← Lecture config.json
+    │   └── Configuration.cs    ← config.json + détection version AutoCAD
     ├── Models/DataModels.cs    ← Modèles de données
     ├── UI/
     │   └── MainForm.cs         ← Formulaire principal (WinForms)

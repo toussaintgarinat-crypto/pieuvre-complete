@@ -15,6 +15,42 @@ namespace PieuvreAutoCAD.Core
         
         public static string ApiUrl { get; private set; }
         public static string DefaultUser { get; private set; }
+
+        // Version d'AutoCAD détectée au runtime (définie par PluginMain.Initialize)
+        public static string AutoCADDisplayVersion { get; internal set; } = "AutoCAD";
+        public static string AutoCADVersionRaw { get; internal set; } = "";
+
+        // Table de correspondance version interne → nom produit
+        // ACADVER format: Major.Minor.Patch.Build
+        // 2021=24.0, 2022=24.1, 2023=24.2, 2024=24.3, 2025=25.0
+        private static readonly System.Collections.Generic.Dictionary<string, string> VERSION_NAMES =
+            new System.Collections.Generic.Dictionary<string, string>
+            {
+                { "24.0", "AutoCAD 2021" },
+                { "24.1", "AutoCAD 2022" },
+                { "24.2", "AutoCAD 2023" },
+                { "24.3", "AutoCAD 2024" },
+                { "25.0", "AutoCAD 2025" },
+            };
+
+        public static void SetAutoCADVersion(string acadverRaw)
+        {
+            AutoCADVersionRaw = acadverRaw ?? "";
+            AutoCADDisplayVersion = "AutoCAD";
+
+            foreach (var entry in VERSION_NAMES)
+            {
+                if (AutoCADVersionRaw.StartsWith(entry.Key))
+                {
+                    AutoCADDisplayVersion = entry.Value;
+                    return;
+                }
+            }
+
+            // Version non reconnue : afficher le numéro brut
+            if (!string.IsNullOrEmpty(AutoCADVersionRaw))
+                AutoCADDisplayVersion = $"AutoCAD ({AutoCADVersionRaw})";
+        }
         
         // ================================================================
         // MODÈLE DE CONFIGURATION

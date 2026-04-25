@@ -13,6 +13,26 @@
     <FileAlignment>512</FileAlignment>
     <Deterministic>true</Deterministic>
   </PropertyGroup>
+
+  <!--
+    DÉTECTION AUTOMATIQUE DU CHEMIN AUTOCAD
+    Priorité : 2023 → 2024 → 2025 (version la plus ancienne en premier
+    pour garantir la compatibilité maximale avec toutes les versions).
+    Override manuel : msbuild /p:AutoCADPath="C:\Program Files\Autodesk\AutoCAD XXXX"
+    ou via variable d'environnement AUTOCAD_PATH.
+  -->
+  <PropertyGroup>
+    <!-- Override via variable d'environnement -->
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND '$(AUTOCAD_PATH)' != ''">$(AUTOCAD_PATH)</AutoCADPath>
+    <!-- AutoCAD 2023 -->
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND Exists('C:\Program Files\Autodesk\AutoCAD 2023\acdbmgd.dll')">C:\Program Files\Autodesk\AutoCAD 2023</AutoCADPath>
+    <!-- AutoCAD 2024 -->
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND Exists('C:\Program Files\Autodesk\AutoCAD 2024\acdbmgd.dll')">C:\Program Files\Autodesk\AutoCAD 2024</AutoCADPath>
+    <!-- AutoCAD 2025 -->
+    <AutoCADPath Condition="'$(AutoCADPath)' == '' AND Exists('C:\Program Files\Autodesk\AutoCAD 2025\acdbmgd.dll')">C:\Program Files\Autodesk\AutoCAD 2025</AutoCADPath>
+    <!-- Fallback : chemin par défaut si rien n'est trouvé (affiche une erreur claire au build) -->
+    <AutoCADPath Condition="'$(AutoCADPath)' == ''">C:\Program Files\Autodesk\AutoCAD 2024</AutoCADPath>
+  </PropertyGroup>
   <PropertyGroup Condition=" '$(Configuration)|$(Platform)' == 'Debug|AnyCPU' ">
     <DebugSymbols>true</DebugSymbols>
     <DebugType>full</DebugType>
@@ -43,18 +63,17 @@
     <Reference Include="System.Net.Http" />
     <Reference Include="System.Xml" />
     
-    <!-- Références AutoCAD -->
-    <!-- IMPORTANT: Ajuster le chemin selon votre version d'AutoCAD -->
+    <!-- Références AutoCAD — chemin résolu automatiquement via $(AutoCADPath) -->
     <Reference Include="acdbmgd">
-      <HintPath>C:\Program Files\Autodesk\AutoCAD 2024\acdbmgd.dll</HintPath>
+      <HintPath>$(AutoCADPath)\acdbmgd.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="acmgd">
-      <HintPath>C:\Program Files\Autodesk\AutoCAD 2024\acmgd.dll</HintPath>
+      <HintPath>$(AutoCADPath)\acmgd.dll</HintPath>
       <Private>False</Private>
     </Reference>
     <Reference Include="AcCui">
-      <HintPath>C:\Program Files\Autodesk\AutoCAD 2024\AcCui.dll</HintPath>
+      <HintPath>$(AutoCADPath)\AcCui.dll</HintPath>
       <Private>False</Private>
     </Reference>
     

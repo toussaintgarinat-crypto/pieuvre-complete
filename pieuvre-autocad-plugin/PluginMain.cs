@@ -24,16 +24,34 @@ namespace PieuvreAutoCAD
         {
             Document doc = Application.DocumentManager.MdiActiveDocument;
             Editor ed = doc?.Editor;
-            
+
+            // Détecter la version d'AutoCAD en cours d'exécution
+            try
+            {
+                string acadver = Application.GetSystemVariable("ACADVER")?.ToString() ?? "";
+                Core.Configuration.SetAutoCADVersion(acadver);
+            }
+            catch
+            {
+                // Fallback : utiliser Application.Version si ACADVER échoue
+                try
+                {
+                    Core.Configuration.SetAutoCADVersion(Application.Version.ToString());
+                }
+                catch { /* laisser la valeur par défaut */ }
+            }
+
             ed?.WriteMessage("\n╔════════════════════════════════════════════╗");
             ed?.WriteMessage($"\n║  {APP_NAME} v{VERSION}                    ║");
             ed?.WriteMessage("\n║  Plugin chargé avec succès                 ║");
+            string acadLine = $"║  {Core.Configuration.AutoCADDisplayVersion}";
+            ed?.WriteMessage($"\n{acadLine.PadRight(45)}║");
             ed?.WriteMessage("\n║  Commandes disponibles :                   ║");
             ed?.WriteMessage("\n║  - PIEUVRE       : Interface principale    ║");
             ed?.WriteMessage("\n║  - PIEUVRESTOCK  : Consulter le stock      ║");
             ed?.WriteMessage("\n║  - PIEUVRECALC   : Calcul rapide           ║");
             ed?.WriteMessage("\n╚════════════════════════════════════════════╝\n");
-            
+
             // Charger la configuration
             try
             {
@@ -243,6 +261,8 @@ namespace PieuvreAutoCAD
             ed.WriteMessage("\n╔════════════════════════════════════════════╗");
             ed.WriteMessage($"\n║  {APP_NAME} v{VERSION}                    ║");
             ed.WriteMessage("\n╠════════════════════════════════════════════╣");
+            string acadInfoLine = $"║  {Core.Configuration.AutoCADDisplayVersion}";
+            ed.WriteMessage($"\n{acadInfoLine.PadRight(45)}║");
             ed.WriteMessage($"\n║  API URL : {Core.Configuration.ApiUrl.PadRight(29)}║");
             ed.WriteMessage($"\n║  Utilisateur : {Core.Configuration.DefaultUser.PadRight(25)}║");
             ed.WriteMessage("\n║                                            ║");
