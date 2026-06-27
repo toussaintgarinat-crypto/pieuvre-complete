@@ -27,7 +27,8 @@ Calcul automatique des bons de coupe (fils + gaines), gestion du stock, suivi de
 |---|---|---|
 | Interface web | React + Vite (servi par nginx) | 80 |
 | API backend | Node.js / Express | 3001 |
-| Base de données | PostgreSQL 16 | interne Docker |
+| Service OCR | Node.js | 3002 |
+| Base de données | PostgreSQL 16 + pgvector | interne Docker |
 | Plugin AutoCAD | C# .NET Framework 4.8 | — |
 
 ---
@@ -48,7 +49,19 @@ git clone <url-du-repo> pieuvre-complete
 cd pieuvre-complete
 ```
 
-### 2. Démarrer le serveur
+### 2. Configurer l'environnement (optionnel mais recommandé)
+
+Pour tester sans clé API (mode mock OCR + RAG) :
+
+```bash
+cp .env.docker.example .env.docker
+```
+
+Le fichier `.env.docker` est ignoré par Git. Par défaut, l'exemple active `VISION_MOCK_MODE=true` et `RAG_MOCK_MODE=true`.
+
+Pour utiliser de vraies clés API (OpenAI ou OpenRouter), modifiez `.env.docker` avant le démarrage.
+
+### 3. Démarrer le serveur
 
 **Mac / Linux :**
 ```bash
@@ -61,17 +74,27 @@ chmod +x start.sh
 docker compose up -d --build
 ```
 
-### 3. Accéder à l'application
+### 4. Accéder à l'application
 
 - **Interface web** → http://localhost
 - **API** → http://localhost:3001/health
 
-### 4. Arrêter
+### 5. Arrêter
 
 ```bash
 ./stop.sh
 # ou
 docker compose down
+```
+
+### Mise à jour d'une base existante
+
+Si vous partez d'une base existante, appliquez les migrations dans l'ordre :
+
+```bash
+docker exec -i pieuvre-db psql -U pieuvre_user -d pieuvre_db < pieuvre-database/migrations/001_add_rag.sql
+docker exec -i pieuvre-db psql -U pieuvre_user -d pieuvre_db < pieuvre-database/migrations/002_add_sprint2.sql
+docker exec -i pieuvre-db psql -U pieuvre_user -d pieuvre_db < pieuvre-database/migrations/003_add_memoire_client_dossier.sql
 ```
 
 ---
@@ -177,6 +200,7 @@ Accessible sur **http://localhost** une fois Docker démarré.
 | Chantiers | Suivi des chantiers par client |
 | Calculs | Historique de tous les bons de coupe |
 | Étiquettes | Génération PDF des étiquettes de pieuvres |
+| Mémoire | Personnalisation OCR et préférences par client/chantier |
 | Stock | Consultation et mise à jour du stock fils/gaines |
 | Config | Paramètres de l'application |
 | Scan | Import/scan de plans |
