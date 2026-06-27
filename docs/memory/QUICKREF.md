@@ -92,6 +92,81 @@ GET    /api/impression/calcul/:id/etiquettes?filtre_type=logement&filtre_valeur=
 - Filtre par **logement** → Toutes les boîtes d'un logement
 - Filtre par **boîte** → Une seule boîte
 
+## Modes de production
+
+| Mode | Description |
+|------|-------------|
+| `direct` | Tableau → appareil |
+| `derivation` | Tableau → boîte de dérivation → appareils |
+
+## Modes d'étiquetage
+
+| Mode | Description |
+|------|-------------|
+| `atelier` | Par boîte d'encastrement |
+| `machine` | Par type / section / gaine |
+
+## Endpoints Sprint 2
+
+```bash
+# Calcul avec mode de production
+POST /api/calculs/compute
+{ "id_chantier": 1, "circuits": [...], "mode_production": "derivation" }
+
+# Générer PDF étiquettes
+GET /api/etiquettes/generer/:calculId?mode_etiquetage=atelier&regroupement={"ordre":["logement","boite"]}
+
+# Session impression
+POST /api/impression/sessions
+GET  /api/impression/sessions
+GET  /api/impression/sessions/:id
+PUT  /api/impression/sessions/:id/marquer
+PUT  /api/impression/sessions/:id/annuler
+GET  /api/impression/calcul/:id/etiquettes?filtre_type=logement&filtre_valeur=Lg1
+```
+
+## Endpoints Sprint 3 — Mémoire client / dossier
+
+```bash
+# Mappings OCR effectifs (héritage : chantier > client > global)
+GET /api/ocr-mappings?id_client=1&id_chantier=1
+
+# Créer un mapping client
+POST /api/ocr-mappings
+{ "id_client": 1, "ocr_type_element": "prise", "ocr_code_symbol": "P16", "circuit_type_code": "P", "priority": 110 }
+
+# Créer un mapping chantier
+POST /api/ocr-mappings
+{ "id_chantier": 1, "ocr_type_element": "prise", "ocr_code_symbol": "PC", "circuit_type_code": "P", "priority": 120 }
+
+# Dupliquer les mappings client vers un chantier
+POST /api/ocr-mappings/duplicate
+{ "id_client": 1, "id_chantier": 2 }
+
+# Prévisualiser la résolution OCR avec la mémoire active
+POST /api/ocr-mappings/preview
+{
+  "devices": [
+    { "type_element": "prise", "code_symbol": "P16" },
+    { "type_element": "lumiere", "code_symbol": "L" }
+  ],
+  "context": { "id_client": 1, "id_chantier": 1 }
+}
+
+# Préférences étiquettes / OCR client
+GET    /api/clients/:id/preferences
+PUT    /api/clients/:id/preferences
+{ "preferences_etiquettes": {"mode_etiquetage":"machine","config_id":2,"regroupement":{"ordre":["type","section","gaine"]}}, "memoire_ocr_active": true }
+
+# Préférences étiquettes / OCR chantier (override client)
+GET    /api/chantiers/:id/preferences
+PUT    /api/chantiers/:id/preferences
+{ "preferences_etiquettes": {"mode_etiquetage":"atelier","regroupement":{"ordre":["logement","boite"]}}, "memoire_ocr_active": true }
+
+# Appliquer la migration 003 sur une base existante
+docker exec -i pieuvre-db psql -U pieuvre_user -d pieuvre_db < pieuvre-database/migrations/003_add_memoire_client_dossier.sql
+```
+
 ## ⚠️ TODO: Types de boîtes
 
 > Différents types de boîtes existent selon le support (placo, béton, bois, etc.)

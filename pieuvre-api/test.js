@@ -12,6 +12,11 @@ const {
   checkDoublagePrises
 } = require('./utils/algorithms');
 
+const {
+  estimateLength,
+  groupDevicesByTypeAndProximity
+} = require('./services/circuitBuilder');
+
 function runTests() {
   console.log('═══════════════════════════════════════════════');
   console.log('🧪 Tests Unitaires - Pieuvre API');
@@ -173,6 +178,45 @@ function runTests() {
     const result = checkDoublagePrises(circuit);
     assert.strictEqual(result.besoinDoublage, false);
     assert.strictEqual(result.nbCircuits, 1);
+  });
+
+  // ====================================================================
+  // Tests: circuitBuilder (Sprint 3)
+  // ====================================================================
+  console.log('\n🔧 circuitBuilder');
+
+  test('estimateLength retourne 1m minimum', () => {
+    assert.strictEqual(estimateLength([]), 10);
+  });
+
+  test('estimateLength calcule la distance max depuis (0,0)', () => {
+    const length = estimateLength([{ x: 100, y: 0 }, { x: 0, y: 100 }]);
+    // max distance = 100, * SCALE_FACTOR 0.05 = 5, arrondi = 5
+    assert.strictEqual(length, 5);
+  });
+
+  test('groupDevicesByTypeAndProximity groupe par type', () => {
+    const devices = [
+      { type_element: 'prise', position_x: 0, position_y: 0 },
+      { type_element: 'prise', position_x: 10, position_y: 0 },
+      { type_element: 'lumiere', position_x: 0, position_y: 100 }
+    ];
+    const groups = groupDevicesByTypeAndProximity(devices, 8);
+    assert.strictEqual(groups.length, 2);
+    assert.strictEqual(groups[0].length, 2);
+    assert.strictEqual(groups[1].length, 1);
+  });
+
+  test('groupDevicesByTypeAndProximity decoupe les prises par lots', () => {
+    const devices = Array.from({ length: 10 }, (_, i) => ({
+      type_element: 'prise',
+      position_x: i * 10,
+      position_y: 0
+    }));
+    const groups = groupDevicesByTypeAndProximity(devices, 8);
+    assert.strictEqual(groups.length, 2);
+    assert.strictEqual(groups[0].length, 8);
+    assert.strictEqual(groups[1].length, 2);
   });
 
   // ====================================================================

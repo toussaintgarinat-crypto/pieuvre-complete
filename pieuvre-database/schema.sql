@@ -4,6 +4,9 @@
 -- ====================================================================
 
 -- Suppression des tables existantes (pour réinstallation propre)
+DROP TABLE IF EXISTS ocr_type_mappings CASCADE;
+DROP TABLE IF EXISTS normes_chunks CASCADE;
+DROP TABLE IF EXISTS normes_documents CASCADE;
 DROP TABLE IF EXISTS historique_stock CASCADE;
 DROP TABLE IF EXISTS calculs CASCADE;
 DROP TABLE IF EXISTS stock_gaines CASCADE;
@@ -16,6 +19,11 @@ DROP TABLE IF EXISTS historique_modifications CASCADE;
 DROP TABLE IF EXISTS templates CASCADE;
 DROP TABLE IF EXISTS entreprises CASCADE;
 DROP TABLE IF EXISTS utilisateurs CASCADE;
+
+-- ====================================================================
+-- EXTENSIONS
+-- ====================================================================
+CREATE EXTENSION IF NOT EXISTS vector;
 
 -- ====================================================================
 -- TABLE: ENTREPRISES
@@ -116,6 +124,13 @@ CREATE TABLE clients (
     contact_telephone VARCHAR(50),
     responsable_compte VARCHAR(255), -- Nom du commercial/gestionnaire
     
+    -- Préférences d'étiquetage par défaut pour ce client
+    -- Ex: {"format": "Avery L7160", "regroupement": {"ordre": ["logement", "boite"]}, "afficher_longueur": true}
+    preferences_etiquettes JSONB DEFAULT '{}'::jsonb,
+    
+    -- Mémoire OCR / symboles personnalisés activée pour ce client
+    memoire_ocr_active BOOLEAN DEFAULT FALSE,
+    
     -- Métadonnées
     actif BOOLEAN DEFAULT TRUE,
     created_at TIMESTAMP DEFAULT NOW(),
@@ -183,6 +198,34 @@ CREATE TABLE IF NOT EXISTS chantiers (
     contact_telephone VARCHAR(50),
     responsable_chantier VARCHAR(255), -- Nom du chef de chantier
     
+    -- Préférences d'étiquetage spécifiques au chantier (override client)
+    preferences_etiquettes JSONB DEFAULT '{}'::jsonb,
+    
+    -- Mémoire OCR / symboles personnalisés activée pour ce chantier
+    memoire_ocr_active BOOLEAN DEFAULT FALSE,
+    
+    -- Mode de production des circuits
+    mode_production VARCHAR(20) DEFAULT 'direct'
+        CHECK (mode_production IN ('direct', 'derivation')),
+
+    -- Longueur de dérivation par défaut (mode alimentation + dérivation)
+    longueur_derivation_m DECIMAL(5,2) DEFAULT 2.50,
+
+    -- Type de support au plafond (impacte le calcul des longueurs et du matériel)
+    type_support VARCHAR(30) DEFAULT 'planchette'
+        CHECK (type_support IN ('dalle_plein', 'planchette', 'mixte')),
+
+    -- Hauteur sous plafond (mètres) pour calculer les descentes de fils
+    hauteur_plafond_m DECIMAL(4,2) DEFAULT 2.50,
+    
+    -- Hauteur par défaut des appareils (mètres)
+    hauteur_prise_m DECIMAL(4,2) DEFAULT 0.30,
+    hauteur_interrupteur_m DECIMAL(4,2) DEFAULT 1.10,
+    
+    -- Besoin en pots / boîtiers
+    besoin_pots BOOLEAN DEFAULT TRUE,
+    types_pots JSONB DEFAULT '["boite_encastrement"]'::jsonb,
+    
     -- Métadonnées
     created_at TIMESTAMP DEFAULT NOW(),
     updated_at TIMESTAMP DEFAULT NOW()
@@ -192,6 +235,13 @@ CREATE TABLE IF NOT EXISTS chantiers (
 CREATE INDEX idx_chantiers_client ON chantiers(id_client);
 CREATE INDEX idx_chantiers_statut ON chantiers(statut);
 CREATE INDEX idx_chantiers_nom ON chantiers(nom);
+
+-- ====================================================================
+-- CLÉS ÉTRANGÈRES DIFFÉRÉES : mappings OCR liés aux clients/chantiers
+-- ====================================================================
+ALTER TABLE ocr_type_mappings
+    ADD CONSTRAINT fk_ocr_mappings_client FOREIGN KEY (id_client) REFERENCES clients(id) ON DELETE CASCADE,
+    ADD CONSTRAINT fk_ocr_mappings_chantier FOREIGN KEY (id_chantier) REFERENCES chantiers(id) ON DELETE CASCADE;
 
 -- ====================================================================
 -- TABLE: STOCK_COULEURS
@@ -273,6 +323,18 @@ CREATE TABLE calculs (
     -- }
     bon_de_coupe JSONB NOT NULL,
     
+    -- Mode de production utilisé pour ce calcul
+    mode_production VARCHAR(20) DEFAULT 'direct'
+        CHECK (mode_production IN ('direct', 'derivation')),
+
+    -- Mode d'étiquetage / fabrication
+    mode_etiquetage VARCHAR(20) DEFAULT 'atelier'
+        CHECK (mode_etiquetage IN ('atelier', 'machine')),
+
+    -- Options de regroupement des étiquettes (JSON)
+    -- Ex: {"ordre": ["logement", "boite"], "grouper_par": ["type", "section"]}
+    regroupement JSONB DEFAULT '{"ordre":["logement","boite"],"grouper_par":[]}'::jsonb,
+
     -- Chemin vers le fichier DWG source
     fichier_dwg_path TEXT,
     
@@ -481,65 +543,137 @@ CREATE TABLE webhooks (
 -- ====================================================================
 CREATE TABLE types_circuits (
     id SERIAL PRIMARY KEY,
-    
+
     -- Code unique (P, L, VD, DA, TEL, BS, VMC, etc.)
     code VARCHAR(10) UNIQUE NOT NULL,
-    
+
     -- Libellé long
     libelle VARCHAR(100) NOT NULL,
-    
+
     -- Description
     description TEXT,
-    
+
     -- Icône ou symbole (pour affichage)
     symbole VARCHAR(20),
-    
+
     -- Style d'affichage (pour étiquettes)
     -- bg_color, text_color, border_style
     style JSONB DEFAULT '{}'::jsonb,
-    
+
     -- Catégorie principale
     categorie VARCHAR(50) CHECK (categorie IN ('prise', 'eclairage', 'commande', 'securite', 'autre')),
-    
+
+    -- Type canonique utilisé par le calculateur (prise, lumiere, va-et-vient, etc.)
+    type_calcul VARCHAR(50),
+
     -- Section par défaut recommandée
     section_par_defaut DECIMAL(3,1),
-    
+
     -- Ordre d'affichage dans les listes
     ordre_affichage INTEGER DEFAULT 0,
-    
+
     -- Actif
     actif BOOLEAN DEFAULT TRUE,
-    
+
     created_at TIMESTAMP DEFAULT NOW()
 );
 
 -- Insertion des types par défaut
-INSERT INTO types_circuits (code, libelle, description, symbole, categorie, section_par_defaut, ordre_affichage, style) VALUES
+INSERT INTO types_circuits (code, libelle, description, symbole, categorie, type_calcul, section_par_defaut, ordre_affichage, style) VALUES
 -- Prises
-('P', 'Prise', 'Circuit prises de courant 16A', 'P', 'prise', 2.5, 10, '{"bg_color": "#E3F2FD", "border_style": "solid"}'),
-('P15', 'Prise 1.5mm²', 'Circuit prises en 1.5mm² (rénovation)', 'P', 'prise', 1.5, 11, '{"bg_color": "#FFF3E0", "border_style": "dashed"}'),
+('P', 'Prise', 'Circuit prises de courant 16A', 'P', 'prise', 'prise', 2.5, 10, '{"bg_color": "#E3F2FD", "border_style": "solid"}'),
+('P15', 'Prise 1.5mm²', 'Circuit prises en 1.5mm² (rénovation)', 'P', 'prise', 'prise', 1.5, 11, '{"bg_color": "#FFF3E0", "border_style": "dashed"}'),
 
 -- Éclairage
-('L', 'Lumière', 'Circuit éclairage simple', 'L', 'eclairage', 1.5, 20, '{"bg_color": "#FFFDE7", "border_style": "solid"}'),
-('L15', 'Lumière 1.5mm²', 'Circuit éclairage 1.5mm²', 'L', 'eclairage', 1.5, 21, '{"bg_color": "#FFFDE7", "border_style": "dashed"}'),
+('L', 'Lumière', 'Circuit éclairage simple', 'L', 'eclairage', 'lumiere', 1.5, 20, '{"bg_color": "#FFFDE7", "border_style": "solid"}'),
+('L15', 'Lumière 1.5mm²', 'Circuit éclairage 1.5mm²', 'L', 'eclairage', 'lumiere', 1.5, 21, '{"bg_color": "#FFFDE7", "border_style": "dashed"}'),
 
 -- Commandes (va-et-vient, double allumage)
-('VD', 'Va-et-vient', 'Va-et-vient (2 inter)', 'VD', 'commande', 1.5, 30, '{"bg_color": "#F3E5F5", "border_style": "dotted"}'),
-('DA', 'Double allumage', 'Double allumage (2 points)', 'DA', 'commande', 1.5, 31, '{"bg_color": "#F3E5F5", "border_style": "dotted"}'),
-('TEL', 'Télérupteur', 'Circuit Télérupteur', 'TEL', 'commande', 1.5, 32, '{"bg_color": "#F3E5F5", "border_style": "dashed"}'),
-('TE', 'Télérupteur', 'Télerupteur (autre)', 'TE', 'commande', 1.5, 33, '{"bg_color": "#F3E5F5", "border_style": "double"}'),
+('I', 'Interrupteur', 'Interrupteur simple', 'I', 'commande', 'telerupteur', 1.5, 29, '{"bg_color": "#F3E5F5", "border_style": "solid"}'),
+('VD', 'Va-et-vient', 'Va-et-vient (2 inter)', 'VD', 'commande', 'va-et-vient', 1.5, 30, '{"bg_color": "#F3E5F5", "border_style": "dotted"}'),
+('DA', 'Double allumage', 'Double allumage (2 points)', 'DA', 'commande', 'double-allumage', 1.5, 31, '{"bg_color": "#F3E5F5", "border_style": "dotted"}'),
+('TEL', 'Télérupteur', 'Circuit Télérupteur', 'TEL', 'commande', 'telerupteur', 1.5, 32, '{"bg_color": "#F3E5F5", "border_style": "dashed"}'),
+('TE', 'Télérupteur', 'Télerupteur (autre)', 'TE', 'commande', 'telerupteur', 1.5, 33, '{"bg_color": "#F3E5F5", "border_style": "double"}'),
 
 -- Sécurité
-('BS', 'Bloc secours', 'Bloc de sécurité', 'BS', 'securite', 1.5, 40, '{"bg_color": "#FFEBEE", "border_style": "solid"}'),
-('DA_S', 'Double allumage secours', 'Double allumage sécurité', 'DA_S', 'securite', 1.5, 41, '{"bg_color": "#FFEBEE", "border_style": "dotted"}'),
+('BS', 'Bloc secours', 'Bloc de sécurité', 'BS', 'securite', 'bs', 1.5, 40, '{"bg_color": "#FFEBEE", "border_style": "solid"}'),
+('DA_S', 'Double allumage secours', 'Double allumage sécurité', 'DA_S', 'securite', 'double-allumage', 1.5, 41, '{"bg_color": "#FFEBEE", "border_style": "dotted"}'),
 
 -- Autres
-('VMC', 'VMC', 'Ventilation Mécanique Contrôlée', 'VMC', 'autre', 1.5, 50, '{"bg_color": "#E0F7FA", "border_style": "solid"}'),
-('VR', 'Volet roulant', 'Volet roulant', 'VR', 'autre', 1.5, 51, '{"bg_color": "#ECEFF1", "border_style": "solid"}'),
-('CUIS', 'Cuisinière', 'Circuit cuisinière/plaque', 'CUIS', 'autre', 6.0, 60, '{"bg_color": "#FBE9E7", "border_style": "solid"}'),
-('LL', 'Lave-linge', 'Circuit lave-linge', 'LL', 'autre', 2.5, 61, '{"bg_color": "#FBE9E7", "border_style": "dashed"}'),
-('LV', 'Lave-vaisselle', 'Circuit lave-vaisselle', 'LV', 'autre', 2.5, 62, '{"bg_color": "#FBE9E7", "border_style": "dashed"}'),
-('PG', 'Prise greenery', 'Prise extérieur/jardin', 'PG', 'autre', 2.5, 70, '{"bg_color": "#E8F5E9", "border_style": "solid"}');
+('VMC', 'VMC', 'Ventilation Mécanique Contrôlée', 'VMC', 'autre', 'vmc', 1.5, 50, '{"bg_color": "#E0F7FA", "border_style": "solid"}'),
+('VR', 'Volet roulant', 'Volet roulant', 'VR', 'autre', 'volet', 1.5, 51, '{"bg_color": "#ECEFF1", "border_style": "solid"}'),
+('CUIS', 'Cuisinière', 'Circuit cuisinière/plaque', 'CUIS', 'autre', 'cuisiniere', 6.0, 60, '{"bg_color": "#FBE9E7", "border_style": "solid"}'),
+('LL', 'Lave-linge', 'Circuit lave-linge', 'LL', 'autre', 'prise', 2.5, 61, '{"bg_color": "#FBE9E7", "border_style": "dashed"}'),
+('LV', 'Lave-vaisselle', 'Circuit lave-vaisselle', 'LV', 'autre', 'prise', 2.5, 62, '{"bg_color": "#FBE9E7", "border_style": "dashed"}'),
+('PG', 'Prise greenery', 'Prise extérieur/jardin', 'PG', 'autre', 'exterieur', 2.5, 70, '{"bg_color": "#E8F5E9", "border_style": "solid"}');
+
+-- ====================================================================
+-- TABLE: OCR_TYPE_MAPPINGS
+-- Mapping entre les types détectés par OCR et les types de circuits
+-- Permet de personnaliser la détermination sans modifier le code
+-- ====================================================================
+CREATE TABLE ocr_type_mappings (
+    id SERIAL PRIMARY KEY,
+    
+    -- Portée du mapping : global (NULL/NULL), client ou chantier
+    -- Les clés étrangères sont ajoutées après création des tables clients/chantiers
+    id_client INT,
+    id_chantier INT,
+    
+    ocr_type_element VARCHAR(50),
+    ocr_code_symbol VARCHAR(50),
+    circuit_type_code VARCHAR(10) NOT NULL REFERENCES types_circuits(code),
+    description TEXT,
+    conditions JSONB DEFAULT '{}'::jsonb,
+    -- Conditions possibles :
+    -- { "min_count": 2, "max_count": 8, "nearby_types": ["interrupteur"], "requires_code": false }
+    priority INTEGER DEFAULT 0,
+    actif BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(id_client, id_chantier, ocr_type_element, ocr_code_symbol)
+);
+
+CREATE INDEX idx_ocr_mappings_code ON ocr_type_mappings(ocr_code_symbol) WHERE ocr_code_symbol IS NOT NULL;
+CREATE INDEX idx_ocr_mappings_type ON ocr_type_mappings(ocr_type_element) WHERE ocr_type_element IS NOT NULL;
+CREATE INDEX idx_ocr_mappings_active ON ocr_type_mappings(actif, priority DESC);
+CREATE INDEX idx_ocr_mappings_client ON ocr_type_mappings(id_client) WHERE id_client IS NOT NULL;
+CREATE INDEX idx_ocr_mappings_chantier ON ocr_type_mappings(id_chantier) WHERE id_chantier IS NOT NULL;
+
+-- Mappings par défaut
+INSERT INTO ocr_type_mappings (ocr_type_element, ocr_code_symbol, circuit_type_code, description, conditions, priority) VALUES
+-- Mapping par code_symbol (priorité haute)
+('prise', 'P', 'P', 'Prise de courant standard', '{"requires_code": true}', 100),
+('prise', 'P15', 'P15', 'Prise 1.5mm²', '{"requires_code": true}', 100),
+('lumiere', 'L', 'L', 'Point lumineux simple', '{"requires_code": true}', 100),
+('lumiere', 'L15', 'L15', 'Lumière 1.5mm²', '{"requires_code": true}', 100),
+('interrupteur', 'VD', 'VD', 'Va-et-vient', '{"requires_code": true}', 100),
+('interrupteur', 'DA', 'DA', 'Double allumage', '{"requires_code": true}', 100),
+('interrupteur', 'TEL', 'TEL', 'Télérupteur', '{"requires_code": true}', 100),
+('communication', 'RJ45', 'TEL', 'Prise réseau', '{"requires_code": true}', 100),
+('securite', 'BS', 'BS', 'Bloc secours', '{"requires_code": true}', 100),
+('securite', 'DI', 'BS', 'Détecteur incendie', '{"requires_code": true}', 100),
+('ventilation', 'VMC', 'VMC', 'VMC', '{"requires_code": true}', 100),
+('volet', 'VR', 'VR', 'Volet roulant', '{"requires_code": true}', 100),
+('appareil', 'CUIS', 'CUIS', 'Cuisinière', '{"requires_code": true}', 100),
+('appareil', 'LL', 'LL', 'Lave-linge', '{"requires_code": true}', 100),
+('appareil', 'LV', 'LV', 'Lave-vaisselle', '{"requires_code": true}', 100),
+('exterieur', 'PG', 'PG', 'Prise extérieure', '{"requires_code": true}', 100),
+-- Mapping par type_element (fallback, priorité plus basse)
+('prise', NULL, 'P', 'Prise détectée sans code explicite', '{}', 50),
+('lumiere', NULL, 'L', 'Lumière détectée sans code explicite', '{}', 50),
+('interrupteur', NULL, 'I', 'Interrupteur simple détecté', '{}', 40),
+('communication', NULL, 'TEL', 'Circuit communication détecté', '{}', 50),
+('securite', NULL, 'BS', 'Circuit sécurité détecté', '{}', 50),
+('ventilation', NULL, 'VMC', 'Ventilation détectée', '{}', 50),
+('volet', NULL, 'VR', 'Volet détecté', '{}', 50),
+('appareil', NULL, 'CUIS', 'Appareil cuisine détecté', '{}', 50),
+('exterieur', NULL, 'PG', 'Extérieur détecté', '{}', 50);
+
+-- Mapping personnalisé client DEMO (id_client = 5)
+-- Ce client appelle ses prises 16A "P16" au lieu de "P".
+INSERT INTO ocr_type_mappings (id_client, ocr_type_element, ocr_code_symbol, circuit_type_code, description, conditions, priority) VALUES
+(5, 'prise', 'P16', 'P', 'Le client DEMO appelle ses prises P16', '{"requires_code": true}', 110);
 
 -- ====================================================================
 -- TABLE: NORMES
@@ -565,6 +699,40 @@ INSERT INTO normes (nom, description, valeur, unite) VALUES
 ('marge_fils', 'Marge par défaut fils', '10', '%'),
 ('marge_gaines', 'Marge par défaut gaines', '10', '%'),
 ('marge_cables', 'Marge par défaut câbles', '15', '%');
+
+-- ====================================================================
+-- TABLE: NORMES_DOCUMENTS
+-- Documents de référence pour le RAG (NF C 15-100, guides métier, etc.)
+-- ====================================================================
+CREATE TABLE normes_documents (
+    id SERIAL PRIMARY KEY,
+    titre VARCHAR(255) NOT NULL,
+    source VARCHAR(100),
+    description TEXT,
+    type_document VARCHAR(50) DEFAULT 'norme',
+    actif BOOLEAN DEFAULT TRUE,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_normes_documents_actif ON normes_documents(actif);
+
+-- ====================================================================
+-- TABLE: NORMES_CHUNKS
+-- Fragments vectorisés des documents de référence
+-- ====================================================================
+CREATE TABLE normes_chunks (
+    id SERIAL PRIMARY KEY,
+    id_document INTEGER NOT NULL REFERENCES normes_documents(id) ON DELETE CASCADE,
+    contenu TEXT NOT NULL,
+    embedding vector(1536),
+    chunk_index INTEGER DEFAULT 0,
+    metadata JSONB DEFAULT '{}'::jsonb,
+    created_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_normes_chunks_document ON normes_chunks(id_document);
+CREATE INDEX idx_normes_chunks_embedding ON normes_chunks USING hnsw (embedding vector_cosine_ops);
 
 -- ====================================================================
 -- TABLE: PARAMETRES
@@ -619,6 +787,59 @@ INSERT INTO config_etiquette (nom, description, largeur_mm, hauteur_mm, impressi
 ('Compact 50x25', 'Étiquette compacte 50x25mm, 4 par ligne', 50, 25, 4, FALSE),
 ('Grand 100x50', 'Étiquette grande 100x50mm, 2 par ligne', 100, 50, 2, FALSE),
 ('Avery L7160', 'Étiquette Avery L7160 (99x34mm)', 99, 34, 3, FALSE);
+
+-- ====================================================================
+-- TABLE: IMPRESSION_SESSIONS
+-- Sessions d'impression ruban continu avec reprise après changement rouleau
+-- ====================================================================
+CREATE TABLE impression_sessions (
+    id SERIAL PRIMARY KEY,
+    id_calcul INTEGER NOT NULL REFERENCES calculs(id) ON DELETE CASCADE,
+    utilisateur VARCHAR(100) NOT NULL,
+
+    -- Filtre appliqué à la session
+    filtre_type VARCHAR(20) DEFAULT 'chantier' CHECK (filtre_type IN ('chantier', 'logement', 'boite')),
+    filtre_valeur VARCHAR(100),
+
+    -- Mode d'étiquetage utilisé pour cette session
+    mode_etiquetage VARCHAR(20) DEFAULT 'atelier' CHECK (mode_etiquetage IN ('atelier', 'machine')),
+    regroupement JSONB DEFAULT '{"ordre":["logement","boite"]}'::jsonb,
+
+    -- Progression
+    etiquettes_totales INTEGER NOT NULL DEFAULT 0,
+    etiquettes_imprimees INTEGER NOT NULL DEFAULT 0,
+    derniere_etiquette VARCHAR(50),
+
+    -- Statut
+    statut VARCHAR(20) DEFAULT 'en_cours' CHECK (statut IN ('en_cours', 'termine', 'annule', 'pause')),
+
+    -- Métadonnées
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_impression_sessions_calcul ON impression_sessions(id_calcul);
+CREATE INDEX idx_impression_sessions_statut ON impression_sessions(statut);
+
+-- ====================================================================
+-- TABLE: IMPRESSION_HISTORIQUE
+-- Traçabilité des actions sur les étiquettes (imprimée, découpée, ignorée)
+-- ====================================================================
+CREATE TABLE impression_historique (
+    id SERIAL PRIMARY KEY,
+    id_session INTEGER NOT NULL REFERENCES impression_sessions(id) ON DELETE CASCADE,
+    etiquette_code VARCHAR(50) NOT NULL,
+    action VARCHAR(20) NOT NULL CHECK (action IN ('imprimee', 'decoupee', 'ignoree', 'reimprimee')),
+    utilisateur VARCHAR(100) NOT NULL,
+    timestamp TIMESTAMP DEFAULT NOW()
+);
+
+CREATE INDEX idx_impression_historique_session ON impression_historique(id_session);
+CREATE INDEX idx_impression_historique_timestamp ON impression_historique(timestamp);
+
+-- Trigger updated_at
+CREATE TRIGGER update_impression_sessions_updated_at BEFORE UPDATE ON impression_sessions
+    FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ====================================================================
 -- TABLE: TEMPLATES
@@ -877,11 +1098,12 @@ INSERT INTO utilisateurs (id_entreprise, nom, prenom, email, password_hash, role
 (1, 'Bernard', 'Pierre', 'pierre.bernard@pieuvre.local', '$2b$10$abcdefghijklmnopqrstuv', 'magasinier');
 
 -- Clients exemple
-INSERT INTO clients (nom, prises_section, eclairage_section, gaines_disponibles, particularites) VALUES
-('BOUYGUES Immobilier', 2.5, 1.5, '[16, 20, 25, 32, 40, 50, 63]', 'Terre systématique en 2.5mm²'),
-('VINCI Construction', 2.5, 1.5, '[20, 25, 32, 40, 50, 63]', 'Norme NF C 15-100 stricte'),
-('EIFFAGE Aménagement', 2.5, 1.5, NULL, NULL),
-('Particuliers - Standard', 1.5, 1.5, '[16, 20, 25, 32]', 'Prises en 1.5mm² autorisées en rénovation');
+INSERT INTO clients (nom, prises_section, eclairage_section, gaines_disponibles, particularites, preferences_etiquettes, memoire_ocr_active) VALUES
+('BOUYGUES Immobilier', 2.5, 1.5, '[16, 20, 25, 32, 40, 50, 63]', 'Terre systématique en 2.5mm²', '{}', FALSE),
+('VINCI Construction', 2.5, 1.5, '[20, 25, 32, 40, 50, 63]', 'Norme NF C 15-100 stricte', '{}', FALSE),
+('EIFFAGE Aménagement', 2.5, 1.5, NULL, NULL, '{}', FALSE),
+('Particuliers - Standard', 1.5, 1.5, '[16, 20, 25, 32]', 'Prises en 1.5mm² autorisées en rénovation', '{}', FALSE),
+('DEMO - Mémoire OCR', 2.5, 1.5, '[16, 20, 25]', 'Client de démonstration pour la mémoire OCR', '{"mode_etiquetage":"machine","regroupement":{"ordre":["type","section","gaine"]}}', TRUE);
 
 -- Stock couleurs standard (sections 1.5 et 2.5 mm²)
 INSERT INTO stock_couleurs (couleur, section, quantite_metres, seuil_alerte, updated_by) VALUES
@@ -919,11 +1141,12 @@ INSERT INTO stock_gaines (diametre, quantite_metres, seuil_alerte, updated_by) V
 (63, 50, 20, 'INIT');
 
 -- Chantiers exemples
-INSERT INTO chantiers (id_client, nom, adresse, statut, date_debut) VALUES
-(1, 'Résidence Les Érables - Lot 23', '12 Avenue de la République, 95290 L''Isle-Adam', 'actif', '2026-03-01'),
-(1, 'Résidence Les Érables - Lot 24', '14 Avenue de la République, 95290 L''Isle-Adam', 'actif', '2026-03-01'),
-(2, 'Tour Horizon - R+12', '45 Boulevard Haussmann, 75008 Paris', 'actif', '2026-02-15'),
-(3, 'Immeuble Pasteur', '78 Rue Pasteur, 92100 Boulogne-Billancourt', 'pause', '2026-01-10');
+INSERT INTO chantiers (id_client, nom, adresse, statut, date_debut, preferences_etiquettes, memoire_ocr_active) VALUES
+(1, 'Résidence Les Érables - Lot 23', '12 Avenue de la République, 95290 L''Isle-Adam', 'actif', '2026-03-01', '{}', FALSE),
+(1, 'Résidence Les Érables - Lot 24', '14 Avenue de la République, 95290 L''Isle-Adam', 'actif', '2026-03-01', '{}', FALSE),
+(2, 'Tour Horizon - R+12', '45 Boulevard Haussmann, 75008 Paris', 'actif', '2026-02-15', '{}', FALSE),
+(3, 'Immeuble Pasteur', '78 Rue Pasteur, 92100 Boulogne-Billancourt', 'pause', '2026-01-10', '{}', FALSE),
+(5, 'Démo Mémoire - Appartement T3', '1 Rue de la Démo, 75000 Paris', 'actif', '2026-06-01', '{"mode_etiquetage":"atelier","regroupement":{"ordre":["logement","boite"]}}', TRUE);
 
 -- Fonction pour ajouter une note à un chantier
 CREATE OR REPLACE FUNCTION ajouter_note_chantier(
@@ -977,7 +1200,13 @@ RETURNS TABLE (
     volets_section DECIMAL,
     cuisson_section DECIMAL,
     couleurs_preferees JSONB,
-    gaines_disponibles JSONB
+    gaines_disponibles JSONB,
+    type_support VARCHAR,
+    hauteur_plafond_m DECIMAL,
+    hauteur_prise_m DECIMAL,
+    hauteur_interrupteur_m DECIMAL,
+    besoin_pots BOOLEAN,
+    types_pots JSONB
 ) AS $$
 BEGIN
     RETURN QUERY
@@ -989,7 +1218,13 @@ BEGIN
         COALESCE(c.volets_section, cl.volets_section),
         COALESCE(c.cuisson_section, cl.cuisson_section),
         cl.couleurs_preferees,
-        COALESCE(c.gaines_disponibles, cl.gaines_disponibles)
+        COALESCE(c.gaines_disponibles, cl.gaines_disponibles),
+        c.type_support,
+        c.hauteur_plafond_m,
+        c.hauteur_prise_m,
+        c.hauteur_interrupteur_m,
+        c.besoin_pots,
+        c.types_pots
     FROM chantiers c
     JOIN clients cl ON c.id_client = cl.id
     WHERE c.id = p_chantier_id;
@@ -1096,6 +1331,7 @@ CREATE TABLE scans (
     id_chantier INT REFERENCES chantiers(id),
     id_client INT REFERENCES clients(id),
     nom_fichier VARCHAR(255) NOT NULL,
+    stored_filename VARCHAR(255),
     type_fichier VARCHAR(20) NOT NULL,
     taille_fichier BIGINT,
     hash_fichier VARCHAR(64),
@@ -1146,6 +1382,25 @@ CREATE TABLE scan_circuits (
 -- FIN DU SCHÉMA
 -- ====================================================================
 
+-- ====================================================================
+-- DONNÉES INITIALES - RAG
+-- Documents de référence sans embeddings (à vectoriser via /api/rag/seed)
+-- ====================================================================
+INSERT INTO normes_documents (titre, source, description, type_document) VALUES
+('NF C 15-100 - Sections et protection des circuits', 'NF C 15-100', 'Règles de section des conducteurs et protection des circuits électriques domestiques et tertiaires', 'norme'),
+('NF C 15-100 - Nombre de prises par circuit', 'NF C 15-100', 'Limitation du nombre de points d''utilisation par circuit de prises de courant', 'norme'),
+('Guide Pieuvre - Choix des gaines', 'Pieuvre Auto', 'Recommandations métier pour le choix des diamètres de gaines selon le nombre et la section des conducteurs', 'guide');
+
+INSERT INTO normes_chunks (id_document, contenu, chunk_index, metadata) VALUES
+(1, 'Les circuits de prises de courant doivent être protégés par des disjoncteurs de 16 A ou 20 A selon la section des conducteurs. En section 1,5 mm², le disjoncteur est limité à 16 A. En section 2,5 mm², le disjoncteur peut être de 20 A.', 0, '{"theme": "section_prises", "mots_cles": ["prises", "section", "disjoncteur"]}'),
+(1, 'Les circuits d''éclairage sont réalisés en conducteurs de 1,5 mm² minimum et protégés par un disjoncteur de 16 A maximum.', 1, '{"theme": "section_eclairage", "mots_cles": ["eclairage", "lumiere", "1.5"]}'),
+(1, 'Les circuits de commande de volets roulants utilisent des conducteurs de 1,5 mm². Ils comportent une phase, un neutre, une terre et deux navettes pour la commande montée/descente.', 2, '{"theme": "section_volets", "mots_cles": ["volet", "vr", "navettes"]}'),
+(1, 'Les circuits alimentant les plaques de cuisson et cuisinières électriques sont réalisés en conducteurs de 6 mm² minimum, protégés par un disjoncteur adapté à la puissance (32 A à 40 A).', 3, '{"theme": "section_cuisson", "mots_cles": ["cuisson", "cuisiniere", "6"]}'),
+(2, 'Un circuit de prises de courant ne doit pas alimenter plus de 8 prises en logement. Au-delà, il faut prévoir un circuit supplémentaire.', 0, '{"theme": "max_prises", "mots_cles": ["prises", "maximum", "8"]}'),
+(2, 'Les prises de courant doivent être réparties de manière à limiter la longueur des circuits et à faciliter l''identification des départs au tableau.', 1, '{"theme": "repartition_prises", "mots_cles": ["prises", "repartition", "tableau"]}'),
+(3, 'Le taux de remplissage des gaines est limité à 40 % de leur section intérieure. Pour un circuit standard 3G2,5 (3 conducteurs 2,5 mm²), une gaine Ø16 est suffisante. Pour 5G1,5 ou plus, privilégier une gaine Ø20 ou Ø25.', 0, '{"theme": "gaine_standard", "mots_cles": ["gaine", "diametre", "remplissage"]}'),
+(3, 'Les circuits de communication (RJ45) et les circuits de sécurité incendie doivent être posés dans des gaines dédiées et identifiées.', 1, '{"theme": "gaine_speciale", "mots_cles": ["gaine", "communication", "securite"]}');
+
 -- Afficher un résumé de la base créée
 DO $$
 BEGIN
@@ -1156,5 +1411,7 @@ BEGIN
     RAISE NOTICE 'Chantiers créés: %', (SELECT COUNT(*) FROM chantiers);
     RAISE NOTICE 'Couleurs en stock: %', (SELECT COUNT(*) FROM stock_couleurs);
     RAISE NOTICE 'Gaines en stock: %', (SELECT COUNT(*) FROM stock_gaines);
+    RAISE NOTICE 'Documents RAG créés: %', (SELECT COUNT(*) FROM normes_documents);
+    RAISE NOTICE 'Chunks RAG créés: %', (SELECT COUNT(*) FROM normes_chunks);
     RAISE NOTICE '====================================================';
 END $$;
