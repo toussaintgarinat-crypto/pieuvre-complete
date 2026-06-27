@@ -24,6 +24,10 @@ Thumbs.db
 
 # Docker volumes
 postgres_data/
+uploads_data/
+
+# Uploads
+pieuvre-api/uploads/
 
 # C# build outputs
 pieuvre-autocad-plugin/bin/

@@ -333,7 +333,7 @@ router.get('/calcul/:id/etiquettes', async (req, res) => {
         if (filtre_type === 'logement' && filtre_valeur) {
           if (etiquette.logement !== filtre_valeur) return;
         } else if (filtre_type === 'boite' && filtre_valeur) {
-          if (etiquette.code !== filtre_valeur) return;
+          if (String(etiquette.numero_boite) !== String(filtre_valeur)) return;
         }
         
         etiquettes.push(etiquette);
@@ -388,16 +388,18 @@ router.post('/imprimer', async (req, res) => {
       filtre_type,
       filtre_valeur,
       start_index,         // Pour reprendre à partir de X
-      duplicate = 1
+      duplicate = 1,
+      mode_etiquetage = 'atelier',
+      regroupement
     } = req.body;
-    
+
     if (!id_calcul || !etiquette_codes) {
       return res.status(400).json({
         success: false,
         error: 'id_calcul et etiquette_codes requis'
       });
     }
-    
+
     // Récupérer les données du calcul
     const calcul = await query(
       `SELECT c.*, ch.nom as chantier_nom, cl.nom as client_nom
@@ -407,31 +409,41 @@ router.post('/imprimer', async (req, res) => {
        WHERE c.id = $1`,
       [id_calcul]
     );
-    
+
     if (calcul.rows.length === 0) {
       return res.status(404).json({ success: false, error: 'Calcul non trouvé' });
     }
-    
+
     // Créer la session
     const sessionResult = await query(
-      `INSERT INTO impression_sessions 
-       (id_calcul, utilisateur, filtre_type, filtre_valeur, etiquettes_totales)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO impression_sessions
+       (id_calcul, utilisateur, filtre_type, filtre_valeur, etiquettes_totales,
+        mode_etiquetage, regroupement)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
        RETURNING *`,
-      [id_calcul, utilisateur, filtre_type || 'boites', filtre_valeur, etiquette_codes.length * duplicate]
+      [
+        id_calcul,
+        utilisateur,
+        filtre_type || 'boites',
+        filtre_valeur,
+        etiquette_codes.length * duplicate,
+        mode_etiquetage,
+        regroupement ? JSON.stringify(regroupement) : null
+      ]
     );
-    
+
     const session = sessionResult.rows[0];
-    
-    // Générer le PDF
-    const PDFDocument = require('pdfkit');
-    const doc = new PDFDocument({ size: [100, 100], layout: 'landscape' });
-    
-    // Note: Intégration PDF à faire avec le routeur etiquetas.js existant
-    
+
+    // Enregistrer les étiquettes dans l'historique comme "imprimées"
+    await query(
+      `INSERT INTO impression_historique (id_session, etiquette_code, action, utilisateur)
+       SELECT $1, unnest($2::varchar[]), 'imprimee', $3`,
+      [session.id, etiquette_codes, utilisateur || 'system']
+    );
+
     res.json({
       success: true,
-      message: 'Session créée - PDF à générer',
+      message: 'Session créée - PDF prêt',
       data: {
         session_id: session.id,
         etiquettes_count: etiquette_codes.length,
@@ -440,7 +452,7 @@ router.post('/imprimer', async (req, res) => {
         pdf_url: `/api/etiquettes/impression/${session.id}`
       }
     });
-    
+
   } catch (error) {
     console.error('Erreur POST /imprimer:', error);
     res.status(500).json({ success: false, error: error.message });

@@ -373,6 +373,68 @@ router.get('/suivi', async (req, res) => {
 });
 
 // ====================================================================
+// GET /api/clients/:id/preferences - Lire les préférences étiquettes/OCR
+// ====================================================================
+router.get('/:id/preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await query(
+      'SELECT preferences_etiquettes, memoire_ocr_active FROM clients WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Client non trouvé' });
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Erreur GET /clients/:id/preferences:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ====================================================================
+// PUT /api/clients/:id/preferences - Mettre à jour les préférences
+// ====================================================================
+router.put('/:id/preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { preferences_etiquettes, memoire_ocr_active } = req.body;
+
+    const fields = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (preferences_etiquettes !== undefined) {
+      fields.push(`preferences_etiquettes = $${paramIndex++}`);
+      values.push(JSON.stringify(preferences_etiquettes));
+    }
+    if (memoire_ocr_active !== undefined) {
+      fields.push(`memoire_ocr_active = $${paramIndex++}`);
+      values.push(memoire_ocr_active);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ success: false, error: 'Aucune préférence à modifier' });
+    }
+
+    values.push(id);
+    const result = await query(
+      `UPDATE clients SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Client non trouvé' });
+    }
+
+    res.json({ success: true, message: 'Préférences enregistrées', data: result.rows[0] });
+  } catch (error) {
+    console.error('Erreur PUT /clients/:id/preferences:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ====================================================================
 // POST /api/clients/:id/notes - Ajouter une note à un client
 // ====================================================================
 router.post('/:id/notes', async (req, res) => {

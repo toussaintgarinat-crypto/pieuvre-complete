@@ -15,18 +15,27 @@ export function EtiquettesPage() {
     est_defaut: false
   });
 
+  const [calculs, setCalculs] = useState([]);
+  const [genConfig, setGenConfig] = useState({
+    calculId: '',
+    configId: '',
+    modeEtiquetage: 'atelier',
+    ordre: ['logement', 'boite']
+  });
+
   useEffect(() => {
     loadData();
   }, []);
 
   async function loadData() {
     try {
-      const [cfgData, typesData] = await Promise.all([
+      const [cfgData, calcData] = await Promise.all([
         api.getEtiquettesConfig(),
-        api.getEtiquettesConfig()
+        api.getCalculs().catch(() => ({ data: [] }))
       ]);
-      setConfigs(cfgData.configurations || []);
-      setTypesCircuits(cfgData.types_circuit || []);
+      setConfigs(cfgData.data?.configurations || []);
+      setTypesCircuits(cfgData.data?.types_circuit || []);
+      setCalculs(calcData.data || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -37,7 +46,7 @@ export function EtiquettesPage() {
   async function handleSubmit(e) {
     e.preventDefault();
     try {
-      await api.createConfig(formData);
+      await api.createEtiquetteConfig(formData);
       setShowForm(false);
       resetForm();
       loadData();
@@ -195,10 +204,88 @@ export function EtiquettesPage() {
         <div className="card-header">
           <h3 className="card-title">Générer des étiquettes</h3>
         </div>
-        <p className="text-secondary mb-4">
-          Pour générer des étiquettes, allez dans la page Calculs et cliquez sur "Étiquettes" 
-          après avoir sélectionné un calcul.
-        </p>
+        <div className="grid grid-2">
+          <div className="form-group">
+            <label className="form-label">Calcul *</label>
+            <select
+              className="form-select"
+              value={genConfig.calculId}
+              onChange={(e) => setGenConfig({ ...genConfig, calculId: e.target.value })}
+            >
+              <option value="">Sélectionner un calcul...</option>
+              {calculs.map(c => (
+                <option key={c.id} value={c.id}>
+                  #{c.id} - {c.chantier_nom} ({new Date(c.date_calcul).toLocaleDateString('fr-FR')})
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Configuration</label>
+            <select
+              className="form-select"
+              value={genConfig.configId}
+              onChange={(e) => setGenConfig({ ...genConfig, configId: e.target.value })}
+            >
+              <option value="">Défaut</option>
+              {configs.map(cfg => (
+                <option key={cfg.id} value={cfg.id}>{cfg.nom}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+        <div className="grid grid-2">
+          <div className="form-group">
+            <label className="form-label">Mode d'étiquetage</label>
+            <select
+              className="form-select"
+              value={genConfig.modeEtiquetage}
+              onChange={(e) => setGenConfig({ ...genConfig, modeEtiquetage: e.target.value })}
+            >
+              <option value="atelier">Atelier (par boîte)</option>
+              <option value="machine">Machine (par type / section / gaine)</option>
+            </select>
+          </div>
+          <div className="form-group">
+            <label className="form-label">Ordre de regroupement</label>
+            <select
+              className="form-select"
+              value={genConfig.ordre.join(',')}
+              onChange={(e) => setGenConfig({ ...genConfig, ordre: e.target.value.split(',').filter(Boolean) })}
+            >
+              <option value="logement,boite">Logement → Boîte</option>
+              <option value="boite,logement">Boîte → Logement</option>
+              <option value="type,section,gaine">Type → Section → Gaine</option>
+              <option value="gaine,type,section">Gaine → Type → Section</option>
+            </select>
+          </div>
+        </div>
+        <div className="flex gap-2 mt-4">
+          <button
+            className="btn btn-primary"
+            disabled={!genConfig.calculId}
+            onClick={async () => {
+              try {
+                const blob = await api.generateEtiquette(
+                  genConfig.calculId,
+                  genConfig.configId || undefined,
+                  genConfig.modeEtiquetage,
+                  { ordre: genConfig.ordre }
+                );
+                const url = window.URL.createObjectURL(blob);
+                const a = document.createElement('a');
+                a.href = url;
+                a.download = `etiquettes_${genConfig.calculId}_${genConfig.modeEtiquetage}.pdf`;
+                a.click();
+                window.URL.revokeObjectURL(url);
+              } catch (err) {
+                alert(err.message);
+              }
+            }}
+          >
+            Télécharger PDF
+          </button>
+        </div>
       </div>
     </div>
   );

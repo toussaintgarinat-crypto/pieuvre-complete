@@ -125,7 +125,15 @@ router.post('/', async (req, res) => {
       contact_nom,
       contact_email,
       contact_telephone,
-      responsable_chantier
+      responsable_chantier,
+      type_support,
+      hauteur_plafond_m,
+      hauteur_prise_m,
+      hauteur_interrupteur_m,
+      besoin_pots,
+      types_pots,
+      mode_production,
+      longueur_derivation_m
     } = req.body;
     
     if (!id_client || !nom) {
@@ -142,16 +150,23 @@ const result = await query(
         cuisson_section, vmc_section, chauffage_section,
         gaines_disponibles,
         date_debut, date_fin_prevue, notes,
-        contact_nom, contact_email, contact_telephone, responsable_chantier
-      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+        contact_nom, contact_email, contact_telephone, responsable_chantier,
+        type_support, hauteur_plafond_m, hauteur_prise_m, hauteur_interrupteur_m,
+        besoin_pots, types_pots,
+        mode_production, longueur_derivation_m
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25)
       RETURNING *`,
       [
         id_client, nom, adresse,
         prises_section, eclairage_section, volets_section,
         cuisson_section, vmc_section, chauffage_section,
-        gaines_disponibles,
-        date_debut, date_fin_prevue, notes,
-        contact_nom, contact_email, contact_telephone, responsable_chantier
+        gaines_disponibles ? JSON.stringify(gaines_disponibles) : null,
+        date_debut, date_fin_prevue, notes ? JSON.stringify(notes) : null,
+        contact_nom, contact_email, contact_telephone, responsable_chantier,
+        type_support, hauteur_plafond_m, hauteur_prise_m, hauteur_interrupteur_m,
+        besoin_pots, types_pots ? JSON.stringify(types_pots) : null,
+        mode_production || 'direct',
+        longueur_derivation_m || 2.50
       ]
     );
     
@@ -193,7 +208,15 @@ router.put('/:id', async (req, res) => {
       contact_nom,
       contact_email,
       contact_telephone,
-      responsable_chantier
+      responsable_chantier,
+      type_support,
+      hauteur_plafond_m,
+      hauteur_prise_m,
+      hauteur_interrupteur_m,
+      besoin_pots,
+      types_pots,
+      mode_production,
+      longueur_derivation_m
     } = req.body;
     
     const fields = [];
@@ -271,6 +294,38 @@ router.put('/:id', async (req, res) => {
     if (responsable_chantier !== undefined) {
       fields.push(`responsable_chantier = $${paramIndex++}`);
       values.push(responsable_chantier);
+    }
+    if (type_support !== undefined) {
+      fields.push(`type_support = $${paramIndex++}`);
+      values.push(type_support);
+    }
+    if (hauteur_plafond_m !== undefined) {
+      fields.push(`hauteur_plafond_m = $${paramIndex++}`);
+      values.push(hauteur_plafond_m);
+    }
+    if (hauteur_prise_m !== undefined) {
+      fields.push(`hauteur_prise_m = $${paramIndex++}`);
+      values.push(hauteur_prise_m);
+    }
+    if (hauteur_interrupteur_m !== undefined) {
+      fields.push(`hauteur_interrupteur_m = $${paramIndex++}`);
+      values.push(hauteur_interrupteur_m);
+    }
+    if (besoin_pots !== undefined) {
+      fields.push(`besoin_pots = $${paramIndex++}`);
+      values.push(besoin_pots);
+    }
+    if (types_pots !== undefined) {
+      fields.push(`types_pots = $${paramIndex++}`);
+      values.push(JSON.stringify(types_pots));
+    }
+    if (mode_production !== undefined) {
+      fields.push(`mode_production = $${paramIndex++}`);
+      values.push(mode_production);
+    }
+    if (longueur_derivation_m !== undefined) {
+      fields.push(`longueur_derivation_m = $${paramIndex++}`);
+      values.push(longueur_derivation_m);
     }
     
     if (fields.length === 0) {
@@ -382,6 +437,68 @@ router.get('/:id/stats', async (req, res) => {
       success: false,
       error: error.message
     });
+  }
+});
+
+// ====================================================================
+// GET /api/chantiers/:id/preferences - Lire les préférences étiquettes/OCR
+// ====================================================================
+router.get('/:id/preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await query(
+      'SELECT preferences_etiquettes, memoire_ocr_active FROM chantiers WHERE id = $1',
+      [id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Chantier non trouvé' });
+    }
+    res.json({ success: true, data: result.rows[0] });
+  } catch (error) {
+    console.error('Erreur GET /chantiers/:id/preferences:', error);
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ====================================================================
+// PUT /api/chantiers/:id/preferences - Mettre à jour les préférences
+// ====================================================================
+router.put('/:id/preferences', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { preferences_etiquettes, memoire_ocr_active } = req.body;
+
+    const fields = [];
+    const values = [];
+    let paramIndex = 1;
+
+    if (preferences_etiquettes !== undefined) {
+      fields.push(`preferences_etiquettes = $${paramIndex++}`);
+      values.push(JSON.stringify(preferences_etiquettes));
+    }
+    if (memoire_ocr_active !== undefined) {
+      fields.push(`memoire_ocr_active = $${paramIndex++}`);
+      values.push(memoire_ocr_active);
+    }
+
+    if (fields.length === 0) {
+      return res.status(400).json({ success: false, error: 'Aucune préférence à modifier' });
+    }
+
+    values.push(id);
+    const result = await query(
+      `UPDATE chantiers SET ${fields.join(', ')} WHERE id = $${paramIndex} RETURNING *`,
+      values
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Chantier non trouvé' });
+    }
+
+    res.json({ success: true, message: 'Préférences enregistrées', data: result.rows[0] });
+  } catch (error) {
+    console.error('Erreur PUT /chantiers/:id/preferences:', error);
+    res.status(500).json({ success: false, error: error.message });
   }
 });
 

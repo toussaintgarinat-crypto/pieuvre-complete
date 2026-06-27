@@ -23,6 +23,8 @@ const etiquettesRoutes = require('./routes/etiquettes');
 const configRoutes = require('./routes/config');
 const scansRoutes = require('./routes/scans');
 const impressionRoutes = require('./routes/impression');
+const ragRoutes = require('./routes/rag');
+const ocrMappingsRoutes = require('./routes/ocrMappings');
 
 // Initialisation de l'application
 const app = express();
@@ -101,6 +103,8 @@ app.use('/api/etiquettes', etiquettesRoutes);
 app.use('/api', configRoutes);
 app.use('/api/scans', scansRoutes);
 app.use('/api/impression', impressionRoutes);
+app.use('/api/rag', ragRoutes);
+app.use('/api/ocr-mappings', ocrMappingsRoutes);
 
 // Route par défaut
 app.get('/', (req, res) => {
@@ -119,7 +123,9 @@ app.get('/', (req, res) => {
       rappels: '/api/rappels',
       webhooks: '/api/webhooks',
       templates: '/api/templates',
-      analytics: '/api/analytics'
+      analytics: '/api/analytics',
+      rag: '/api/rag',
+      ocrMappings: '/api/ocr-mappings'
     }
   });
 });

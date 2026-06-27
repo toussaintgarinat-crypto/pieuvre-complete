@@ -16,7 +16,15 @@ export function ChantiersPage() {
     adresse: '',
     code_postal: '',
     ville: '',
-    notes: ''
+    notes: '',
+    type_support: 'planchette',
+    hauteur_plafond_m: 2.50,
+    hauteur_prise_m: 0.30,
+    hauteur_interrupteur_m: 1.10,
+    besoin_pots: true,
+    types_pots: ['boite_encastrement'],
+    mode_production: 'direct',
+    longueur_derivation_m: 2.50
   });
 
   useEffect(() => {
@@ -66,7 +74,15 @@ export function ChantiersPage() {
       adresse: '',
       code_postal: '',
       ville: '',
-      notes: ''
+      notes: '',
+      type_support: 'planchette',
+      hauteur_plafond_m: 2.50,
+      hauteur_prise_m: 0.30,
+      hauteur_interrupteur_m: 1.10,
+      besoin_pots: true,
+      types_pots: ['boite_encastrement'],
+      mode_production: 'direct',
+      longueur_derivation_m: 2.50
     });
   }
 
@@ -81,7 +97,15 @@ export function ChantiersPage() {
       adresse: chantier.adresse || '',
       code_postal: chantier.code_postal || '',
       ville: chantier.ville || '',
-      notes: chantier.notes || ''
+      notes: chantier.notes || '',
+      type_support: chantier.type_support || 'planchette',
+      hauteur_plafond_m: chantier.hauteur_plafond_m ?? 2.50,
+      hauteur_prise_m: chantier.hauteur_prise_m ?? 0.30,
+      hauteur_interrupteur_m: chantier.hauteur_interrupteur_m ?? 1.10,
+      besoin_pots: chantier.besoin_pots ?? true,
+      types_pots: Array.isArray(chantier.types_pots) ? chantier.types_pots : ['boite_encastrement'],
+      mode_production: chantier.mode_production || 'direct',
+      longueur_derivation_m: chantier.longueur_derivation_m ?? 2.50
     });
     setShowForm(true);
   }
@@ -202,6 +226,88 @@ export function ChantiersPage() {
                 />
               </div>
             </div>
+
+            <h4 className="mt-4 mb-2">Configuration installation</h4>
+            <div className="grid grid-2">
+              <div className="form-group">
+                <label className="form-label">Mode de production</label>
+                <select
+                  className="form-select"
+                  value={formData.mode_production}
+                  onChange={(e) => setFormData({ ...formData, mode_production: e.target.value })}
+                >
+                  <option value="direct">Direct (tableau → appareil)</option>
+                  <option value="derivation">Alimentation + dérivation</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Longueur dérivation (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-input"
+                  value={formData.longueur_derivation_m}
+                  onChange={(e) => setFormData({ ...formData, longueur_derivation_m: parseFloat(e.target.value) })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-2">
+              <div className="form-group">
+                <label className="form-label">Type de support</label>
+                <select
+                  className="form-select"
+                  value={formData.type_support}
+                  onChange={(e) => setFormData({ ...formData, type_support: e.target.value })}
+                >
+                  <option value="planchette">Planchette / Faux-plafond</option>
+                  <option value="dalle_plein">Dalle plein</option>
+                  <option value="mixte">Mixte</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Hauteur sous plafond (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-input"
+                  value={formData.hauteur_plafond_m}
+                  onChange={(e) => setFormData({ ...formData, hauteur_plafond_m: parseFloat(e.target.value) })}
+                />
+              </div>
+            </div>
+            <div className="grid grid-2">
+              <div className="form-group">
+                <label className="form-label">Hauteur prise (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-input"
+                  value={formData.hauteur_prise_m}
+                  onChange={(e) => setFormData({ ...formData, hauteur_prise_m: parseFloat(e.target.value) })}
+                />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Hauteur interrupteur (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
+                  className="form-input"
+                  value={formData.hauteur_interrupteur_m}
+                  onChange={(e) => setFormData({ ...formData, hauteur_interrupteur_m: parseFloat(e.target.value) })}
+                />
+              </div>
+            </div>
+            <div className="form-group">
+              <label className="form-label flex gap-2 items-center">
+                <input
+                  type="checkbox"
+                  checked={formData.besoin_pots}
+                  onChange={(e) => setFormData({ ...formData, besoin_pots: e.target.checked })}
+                />
+                Besoin en pots / boîtiers
+              </label>
+            </div>
+
             <div className="form-group">
               <label className="form-label">Notes</label>
               <textarea

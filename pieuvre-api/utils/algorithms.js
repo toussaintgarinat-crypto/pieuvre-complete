@@ -75,6 +75,93 @@ function getMargesEffectives(profil) {
 }
 
 /**
+ * Détermine la hauteur d'installation d'un appareil selon son type
+ * @param {string} type - Type de circuit/appareil
+ * @param {Object} profil - Profil chantier avec hauteurs
+ * @returns {number} Hauteur en mètres
+ */
+function getHauteurAppareil(type, profil) {
+  const typeLower = (type || '').toLowerCase();
+  const hPrise = profil.hauteur_prise_m ?? 0.30;
+  const hInter = profil.hauteur_interrupteur_m ?? 1.10;
+  
+  if (['prise', 'p', 'p20', 'p_etanche', 'p_pmr', 'pg'].includes(typeLower)) {
+    return hPrise;
+  }
+  if (['lumiere', 'l', 'lum', 'l_enc', 'vmc', 'bs'].includes(typeLower)) {
+    return 0; // au plafond, pas de descente depuis le plafond
+  }
+  if (['interrupteur', 'i', 'vd', 'da', 'tel'].includes(typeLower)) {
+    return hInter;
+  }
+  if (['cuisiniere', 'cuis', 'll', 'lv'].includes(typeLower)) {
+    return hPrise + 0.20; // appareils de cuisine légèrement plus haut
+  }
+  return hPrise;
+}
+
+/**
+ * Calcule la longueur de descente depuis le plafond jusqu'à l'appareil
+ * @param {string} type - Type de circuit/appareil
+ * @param {Object} profil - Profil chantier avec hauteur_plafond_m
+ * @returns {number} Longueur de descente en mètres
+ */
+function calculateDescente(type, profil) {
+  const hPlafond = profil.hauteur_plafond_m ?? 2.50;
+  const hAppareil = getHauteurAppareil(type, profil);
+  return Math.max(0, hPlafond - hAppareil);
+}
+
+/**
+ * Calcule les pots / boîtiers nécessaires selon le support et les circuits
+ * @param {Array} circuits - Circuits optimisés
+ * @param {Object} profil - Profil chantier
+ * @returns {Array} Liste des pots avec quantité
+ */
+function calculatePots(circuits, profil) {
+  if (!profil.besoin_pots) return [];
+  
+  const typeSupport = profil.type_support || 'planchette';
+  const pots = [];
+  let totalPoints = 0;
+  
+  circuits.forEach(circuit => {
+    const nbPoints = circuit.nb_points || circuit.nb_prises || 1;
+    totalPoints += nbPoints;
+  });
+  
+  // 1 pot par point d'appareil (prise, lumière, interrupteur...)
+  pots.push({
+    type: 'boite_encastrement',
+    quantite: totalPoints,
+    unite: 'pcs',
+    justificatif: `${totalPoints} point(s) d'appareil`
+  });
+  
+  // En dalle plein, on ajoute des boîtes de dérivation (pas de passage dans le plafond)
+  if (typeSupport === 'dalle_plein') {
+    pots.push({
+      type: 'boite_derivation',
+      quantite: circuits.length,
+      unite: 'pcs',
+      justificatif: '1 boîte de dérivation par circuit en dalle plein'
+    });
+  }
+  
+  // Faux-plafond / planchette : gaines annulaires si besoin
+  if (typeSupport === 'planchette' || typeSupport === 'mixte') {
+    pots.push({
+      type: 'manchon_annulaire',
+      quantite: Math.ceil(totalPoints / 2),
+      unite: 'pcs',
+      justificatif: 'Manchons pour passage étanche dans planchette'
+    });
+  }
+  
+  return pots;
+}
+
+/**
  * Mutualise les conductores de terre entre circuits partageant la même gaine
  * Règle: utiliser la section max de terre nécessaire
  */
@@ -176,13 +263,65 @@ function findCouleurAlternative(couleurOriginale, fonction, section, stock) {
 }
 
 /**
+ * Construit les circuits en mode alimentation + dérivation.
+ * Chaque circuit original génère un circuit d'alimentation tableau → boîte de dérivation
+ * puis un circuit de dérivation par point d'appareil (boîte → appareil).
+ */
+function buildDerivationCircuits(circuits, longueurDerivationDefault = 2.5) {
+  const result = [];
+
+  circuits.forEach(circuit => {
+    const nbPoints = circuit.nb_points || circuit.nb_prises || 1;
+    const longueurDerivation = parseFloat(circuit.longueur_derivation_m) || longueurDerivationDefault;
+    const longueurOriginale = parseFloat(circuit.longueur) || 0;
+
+    // Longueur du tronçon commun (alimentation) = longueur totale - portion moyenne dérivation
+    const longueurAlim = Math.max(0, longueurOriginale - longueurDerivation);
+
+    // Circuit d'alimentation (phase/neutre/terre uniquement, pas de navettes)
+    result.push({
+      ...circuit,
+      id: `${circuit.id}-alim`,
+      type: 'alimentation',
+      type_code: 'ALIM',
+      longueur: longueurAlim,
+      nb_prises: nbPoints,
+      nb_points: nbPoints,
+      navettes: [],
+      est_alimentation: true,
+      circuit_source: circuit.id,
+      info: 'Alimentation tableau → boîte de dérivation'
+    });
+
+    // Circuits de dérivation (un par point)
+    for (let i = 0; i < nbPoints; i++) {
+      result.push({
+        ...circuit,
+        id: `${circuit.id}-deriv-${i + 1}`,
+        type: circuit.type,
+        longueur: longueurDerivation,
+        nb_prises: 1,
+        nb_points: 1,
+        est_derivation: true,
+        circuit_source: circuit.id,
+        derivation_index: i + 1,
+        info: `Dérivation boîte → appareil ${i + 1}`
+      });
+    }
+  });
+
+  return result;
+}
+
+/**
  * Génère un bon de coupe optimisé
  * @param {Array} circuits - Circuits à calculer
  * @param {Array} stock - Stock disponible {couleur, section, quantite_metres}
  * @param {Object} profilChantier - Profil du chantier {prises_section, eclairage_section, gaines_disponibles}
  * @param {Array} stockGaines - Stock gaines {diametre, quantite_metres}
+ * @param {string} modeProduction - 'direct' ou 'derivation'
  */
-function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null) {
+function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null, modeProduction = 'direct') {
   const bonDeCoupe = {
     fils: [],
     gaines: [],
@@ -199,14 +338,29 @@ function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null)
   
   // Récupérer les gaines disponibles (par défaut toutes)
   const gainesDisponibles = profilChantier.gaines_disponibles || [16, 20, 25, 32, 40, 50, 63];
-  
+
   // Récupérer les marges (pour fils et gaines)
   const marges = getMargesEffectives(profilChantier);
-  
+
+  // Déterminer le mode de production effectif
+  const modeProductionEffectif = modeProduction === 'derivation' ? 'derivation' : 'direct';
+  const longueurDerivationDefault = parseFloat(profilChantier.longueur_derivation_m) || 2.5;
+
+  // Transformer les circuits selon le mode de production
+  let circuitsEnEntree = circuits;
+  if (modeProductionEffectif === 'derivation') {
+    circuitsEnEntree = buildDerivationCircuits(circuits, longueurDerivationDefault);
+    bonDeCoupe.alertes.push({
+      type: 'mode_production',
+      message: `Mode de production : alimentation + dérivation (longueur dérivation ${longueurDerivationDefault}m)`,
+      severite: 'info'
+    });
+  }
+
   // 1. Traiter le doublage des prises (NF C 15-100: max 8 prises/circuit)
   const circuitsTraites = [];
-  
-  circuits.forEach(circuit => {
+
+  circuitsEnEntree.forEach(circuit => {
     const doublage = checkDoublagePrises(circuit);
     
     if (doublage.besoinDoublage) {
@@ -240,10 +394,28 @@ function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null)
   
   // 2. Pour chaque circuit, calculer les besoins
   circuitsOptimises.forEach(circuit => {
+    const nbPoints = circuit.nb_points || circuit.nb_prises || 1;
+    const descente = calculateDescente(circuit.type, profilChantier);
+    const longueurTotale = circuit.longueur + (descente * nbPoints);
+    
     const circuitDetail = {
       id: circuit.id,
       type: circuit.type,
+      type_code: circuit.type_code || circuit.type,
       longueur: circuit.longueur,
+      nb_points: nbPoints,
+      descente_par_point: descente,
+      longueur_totale: longueurTotale,
+      // Localisation pour étiquetage
+      etage: circuit.etage || '',
+      appartement: circuit.appartement || '',
+      logement: circuit.logement || circuit.appartement || '',
+      numero_boite: circuit.numero_boite || null,
+      batiment: circuit.batiment || '',
+      // Mode production
+      est_alimentation: circuit.est_alimentation || false,
+      est_derivation: circuit.est_derivation || false,
+      circuit_source: circuit.circuit_source || null,
       conducteurs: []
     };
     
@@ -253,7 +425,7 @@ function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null)
         fonction: 'Phase',
         couleur: circuit.phase_couleur || 'Rouge',
         section: circuit.phase_section || profilChantier.prises_section,
-        longueur: circuit.longueur
+        longueur: longueurTotale
       });
     }
     
@@ -263,7 +435,7 @@ function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null)
         fonction: 'Neutre',
         couleur: 'Bleu',
         section: circuit.neutre_section || profilChantier.prises_section,
-        longueur: circuit.longueur
+        longueur: longueurTotale
       });
     }
     
@@ -273,7 +445,7 @@ function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null)
         fonction: 'Terre',
         couleur: 'Vert/Jaune',
         section: circuit.terre_section_mutualisee || circuit.terre_section,
-        longueur: circuit.longueur,
+        longueur: longueurTotale,
         mutualisee: circuit.terre_mutualisee
       });
     }
@@ -285,7 +457,7 @@ function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null)
           fonction: 'Navette',
           couleur: navette.couleur || 'Orange',
           section: navette.section || 1.5,
-          longueur: circuit.longueur
+          longueur: longueurTotale
         });
       });
     }
@@ -397,7 +569,7 @@ function generateBonDeCoupe(circuits, stock, profilChantier, stockGaines = null)
     }
     
     const gaine = gainesMap.get(key);
-    gaine.longueur_base += circuit.longueur;
+    gaine.longueur_base += circuit.longueur_totale;
     gaine.longueur = applyMarge(gaine.longueur_base, marges.marge_gaines, marges.longueur_min_gaines);
     gaine.circuits.push(circuit.id);
   });
@@ -418,7 +590,13 @@ bonDeCoupe.gaines.forEach(gaine => {
     });
   }
   
-  // 7. Calculer les stats
+  // 7. Calculer les pots / boîtiers nécessaires
+  bonDeCoupe.pots = calculatePots(circuitsOptimises, profilChantier);
+  if (bonDeCoupe.pots.length > 0) {
+    bonDeCoupe.stats.nb_pots = bonDeCoupe.pots.reduce((sum, p) => sum + p.quantite, 0);
+  }
+  
+  // 8. Calculer les stats
   bonDeCoupe.stats.longueur_totale_fils = bonDeCoupe.fils.reduce((sum, f) => sum + f.longueur, 0);
   bonDeCoupe.stats.longueur_totale_gaines = bonDeCoupe.gaines.reduce((sum, g) => sum + g.longueur, 0);
   
@@ -433,5 +611,8 @@ module.exports = {
   mutualizeConductors,
   checkDoublagePrises,
   findCouleurAlternative,
+  getHauteurAppareil,
+  calculateDescente,
+  calculatePots,
   generateBonDeCoupe
 };

@@ -7,6 +7,7 @@ import { StockPage } from './pages/Stock';
 import { DashboardPage } from './pages/Dashboard';
 import { ConfigPage } from './pages/Config';
 import { ScansPage } from './pages/Scans';
+import { MemoireClientPage } from './pages/MemoireClient';
 
 function NavLink({ to, children }) {
   const location = useLocation();
@@ -36,6 +37,7 @@ function Layout({ children }) {
             <NavLink to="/stock">Stock</NavLink>
             <NavLink to="/config">Config</NavLink>
             <NavLink to="/scans">Scan</NavLink>
+            <NavLink to="/memoire">Mémoire</NavLink>
           </nav>
         </div>
       </header>
@@ -59,6 +61,7 @@ export function App() {
           <Route path="/stock" element={<StockPage />} />
           <Route path="/config" element={<ConfigPage />} />
           <Route path="/scans" element={<ScansPage />} />
+          <Route path="/memoire" element={<MemoireClientPage />} />
         </Routes>
       </Layout>
     </BrowserRouter>

@@ -9,6 +9,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const crypto = require('crypto');
+const ocr = require('../services/ocr');
+const { searchForCircuitContext } = require('../services/rag');
 
 const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads/scans';
 if (!fs.existsSync(UPLOAD_DIR)) {
@@ -62,7 +64,7 @@ function detectSymbolsFromText(text, symboles) {
   const elements = [];
   const textLines = text.split('\n').map(l => l.trim()).filter(l => l);
   
-  symbolique.forEach(sym => {
+  symboles.forEach(sym => {
     const clientCode = sym.client_code || sym.code;
     textLines.forEach((line, idx) => {
       if (line.includes(clientCode) || line.match(new RegExp(clientCode, 'i'))) {
@@ -130,24 +132,26 @@ router.post('/upload', upload.single('fichier'), async (req, res) => {
     const hash = crypto.createHash('sha256').update(req.file.filename).digest('hex');
     
     const result = await query(`
-      INSERT INTO scans (id_chantier, id_client, nom_fichier, type_fichier, taille_fichier, hash_fichier, methode_scan, statut)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, 'en_attente')
+      INSERT INTO scans (id_chantier, id_client, nom_fichier, stored_filename, type_fichier, taille_fichier, hash_fichier, methode_scan, statut)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, $8, 'en_attente')
       RETURNING id
     `, [
       id_chantier || null,
       id_client || null,
       req.file.originalname,
+      req.file.filename,
       typeFichier,
       req.file.size,
       hash,
       methode_scan || 'local'
     ]);
-    
+
     res.json({
       success: true,
       data: {
         id: result.rows[0].id,
         nom_fichier: req.file.originalname,
+        stored_filename: req.file.filename,
         type_fichier: typeFichier,
         taille: req.file.size
       }
@@ -181,35 +185,66 @@ router.post('/process/:id', async (req, res) => {
     try {
       const clientId = scanData.id_client;
       const symboles = await getSymbolesForClient(clientId);
-      
+      const filePath = path.join(UPLOAD_DIR, scanData.stored_filename || scanData.nom_fichier);
+
+      let ocrResult = { dispositifs: [], notes: '' };
+
       if (scanData.type_fichier === 'image') {
-        const text = await detectFromImage(scanData.nom_fichier, symboles);
-        elements = detectSymbolsFromText(text, symboles.rows);
+        ocrResult = await detectFromImage(filePath);
       } else if (scanData.type_fichier === 'pdf') {
-        const text = await detectFromPDF(scanData.nom_fichier, symboles);
-        elements = detectSymbolsFromText(text, symboles.rows);
+        ocrResult = await detectFromPDF(filePath);
       } else if (scanData.type_fichier === 'cad') {
-        elements = await detectFromCAD(scanData.nom_fichier, symboles);
+        ocrResult = await detectFromCAD(filePath);
       }
-      
+
+      // Conversion des dispositifs OCR en éléments de scan
+      elements = (ocrResult.dispositifs || []).map(d => ({
+        type_element: d.type_element || 'autre',
+        code_symbol: d.code_symbol || d.type_element,
+        position_x: d.position_x || 0,
+        position_y: d.position_y || 0,
+        label: d.label || '',
+        confiance: d.confiance || 0.5,
+        source_detection: 'vision'
+      }));
+
+      // Fallback sur la détection texte si la vision ne retourne rien
+      if (elements.length === 0 && symboles.rows.length > 0) {
+        let fallbackText = '';
+        if (scanData.type_fichier === 'image') {
+          fallbackText = await detectFromImageFallback(filePath);
+        } else if (scanData.type_fichier === 'pdf') {
+          fallbackText = await detectFromPDFFallback(filePath);
+        } else if (scanData.type_fichier === 'cad') {
+          fallbackText = await detectFromCADFallback(filePath);
+        }
+        if (fallbackText) {
+          elements = detectSymbolsFromText(fallbackText, symboles.rows);
+        }
+      }
+
       if (methode === 'api_externe') {
         const apiElements = await detectFromAPI(scanData, methode);
         elements = [...elements, ...apiElements];
       }
-      
+
       circuits = mapElementsToCircuits(elements);
-      
+
       for (const circuit of circuits) {
         circuit.type_element = calculateCircuitType(circuit.type_element, circuit.nombre_elements);
       }
-      
+
     } catch (err) {
       erreurs = err.message;
     }
-    
-    await query(`UPDATE scans SET nb_elements_detectes = $1, statut = $2, erreurs = $3, processed_at = NOW() WHERE id = $4`, 
+
+    // Nettoyer les anciens résultats avant de réinsérer
+    await query(`DELETE FROM scan_elements WHERE id_scan = $1`, [id]);
+    await query(`DELETE FROM scan_circuits WHERE id_scan = $1`, [id]);
+
+    await query(`UPDATE scans SET nb_elements_detectes = $1, statut = $2, erreurs = $3, processed_at = NOW() WHERE id = $4`,
       [elements.length, erreurs ? 'erreur' : 'termine', erreurs, id]);
-    
+
     for (const el of elements) {
       await query(`
         INSERT INTO scan_elements (id_scan, type_element, code_symbol, position_x, position_y, label, confiance, source_detection)
@@ -242,16 +277,58 @@ router.post('/process/:id', async (req, res) => {
   }
 });
 
-async function detectFromImage(filename, symboles) {
-  return [];
+async function detectFromImage(filePath) {
+  return ocr.detectFromImage(filePath);
 }
 
-async function detectFromPDF(filename, symboles) {
-  return [];
+async function detectFromPDF(filePath) {
+  return ocr.detectFromPDF(filePath);
 }
 
-async function detectFromCAD(filename, symboles) {
-  return [];
+async function detectFromCAD(filePath) {
+  return ocr.detectFromCAD(filePath);
+}
+
+async function detectFromImageFallback(filePath) {
+  // Pas de fallback OCR texte natif sur une image brute
+  return '';
+}
+
+async function detectFromPDFFallback(filePath) {
+  try {
+    const pdfParse = require('pdf-parse');
+    const buffer = fs.readFileSync(filePath);
+    const data = await pdfParse(buffer);
+    return data.text || '';
+  } catch (err) {
+    return '';
+  }
+}
+
+async function detectFromCADFallback(filePath) {
+  try {
+    const buffer = fs.readFileSync(filePath);
+    return extractStrings(buffer);
+  } catch (err) {
+    return '';
+  }
+}
+
+function extractStrings(buffer) {
+  const minLength = 4;
+  const strings = [];
+  let current = '';
+  for (let i = 0; i < buffer.length; i++) {
+    const byte = buffer[i];
+    if (byte >= 32 && byte <= 126) {
+      current += String.fromCharCode(byte);
+    } else {
+      if (current.length >= minLength) strings.push(current);
+      current = '';
+    }
+  }
+  if (current.length >= minLength) strings.push(current);
+  return strings.join('\n').substring(0, 5000);
 }
 
 async function detectFromAPI(scanData, methode) {
@@ -292,7 +369,7 @@ router.get('/:id', async (req, res) => {
 router.get('/', async (req, res) => {
   try {
     const { id_chantier, statut } = req.query;
-    let sql = `SELECT s.*, ch.nom as_chantier_nom, c.nom as client_nom 
+    let sql = `SELECT s.*, ch.nom as chantier_nom, c.nom as client_nom 
                FROM scans s 
                LEFT JOIN chantiers ch ON s.id_chantier = ch.id 
                LEFT JOIN clients c ON s.id_client = c.id`;
@@ -381,13 +458,13 @@ router.post('/import/:id', async (req, res) => {
   try {
     const { id } = req.params;
     const { id_calcul } = req.body;
-    
+
     const scanCircuits = await query(`SELECT * FROM scan_circuits WHERE id_scan = $1 AND imported = false`, [id]);
-    
+
     if (scanCircuits.rows.length === 0) {
       return res.status(400).json({ success: false, error: 'Aucun circuit a importer' });
     }
-    
+
     const circuitsASuivre = scanCircuits.rows.map(c => {
       const data = typeof c.circuit === 'string' ? JSON.parse(c.circuit) : c.circuit;
       return {
@@ -399,13 +476,84 @@ router.post('/import/:id', async (req, res) => {
         logement: ''
       };
     });
-    
+
     res.json({
       success: true,
       data: circuitsASuivre,
       message: `${circuitsASuivre.length} circuits prets pour import`
     });
   } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+});
+
+// ====================================================================
+// CALCULER - Calculer un bon de coupe depuis un scan (via RAG + OCR)
+// ====================================================================
+router.post('/:id/calculer', async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { id_chantier, options = {} } = req.body;
+
+    if (!id_chantier) {
+      return res.status(400).json({ success: false, error: 'id_chantier est requis' });
+    }
+
+    const scan = await query(`SELECT * FROM scans WHERE id = $1`, [id]);
+    if (scan.rows.length === 0) {
+      return res.status(404).json({ success: false, error: 'Scan non trouve' });
+    }
+
+    const scanData = scan.rows[0];
+
+    // Si le scan n'a pas encore été traité, le traiter automatiquement
+    if (scanData.statut === 'en_attente') {
+      await fetch(`http://localhost:${process.env.PORT || 3001}/api/scans/process/${id}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({})
+      });
+    }
+
+    const elementsResult = await query(`
+      SELECT type_element, code_symbol, position_x, position_y, label, confiance
+      FROM scan_elements WHERE id_scan = $1
+    `, [id]);
+
+    if (elementsResult.rows.length === 0) {
+      return res.status(400).json({ success: false, error: 'Aucun element detecte dans ce scan' });
+    }
+
+    const { buildCircuitsFromDevices } = require('../services/circuitBuilder');
+    const { computeBonDeCoupe } = require('../services/calculService');
+
+    const circuits = await buildCircuitsFromDevices(elementsResult.rows, {
+      maxPrisesParCircuit: options.maxPrisesParCircuit || 8,
+      useRAG: options.useRAG !== false,
+      context: {
+        id_client: scanData.id_client,
+        id_chantier: parseInt(id_chantier)
+      }
+    });
+
+    if (circuits.length === 0) {
+      return res.status(400).json({ success: false, error: 'Aucun circuit constructible depuis les elements detectes' });
+    }
+
+    const bonDeCoupe = await computeBonDeCoupe(id_chantier, circuits);
+
+    res.json({
+      success: true,
+      data: {
+        scan_id: parseInt(id),
+        chantier_id: id_chantier,
+        nb_circuits: circuits.length,
+        circuits,
+        bon_de_coupe: bonDeCoupe
+      }
+    });
+  } catch (error) {
+    console.error('Erreur POST /scans/:id/calculer:', error);
     res.status(500).json({ success: false, error: error.message });
   }
 });

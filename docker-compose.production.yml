@@ -6,10 +6,10 @@ version: '3.8'
 
 services:
   # ====================================================================
-  # Base de données PostgreSQL
+  # Base de données PostgreSQL avec pgvector
   # ====================================================================
   postgres:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: pieuvre-db
     restart: unless-stopped
     environment:
@@ -35,8 +35,8 @@ services:
   # ====================================================================
   api:
     build:
-      context: ./pieuvre-api
-      dockerfile: ../Dockerfile.api
+      context: .
+      dockerfile: Dockerfile.api
     container_name: pieuvre-api
     restart: unless-stopped
     environment:
@@ -48,11 +48,57 @@ services:
       DB_USER: ${DB_USER:-pieuvre_user}
       DB_PASSWORD: ${DB_PASSWORD:-pieuvre_pass}
       WEB_URL: ${WEB_URL:-http://localhost:3000}
+      # RAG / Embeddings
+      EMBEDDING_PROVIDER: ${EMBEDDING_PROVIDER:-openai}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_EMBEDDING_MODEL: ${OPENAI_EMBEDDING_MODEL:-text-embedding-3-small}
+      OPENAI_API_BASE: ${OPENAI_API_BASE:-https://api.openai.com/v1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_EMBEDDING_MODEL: ${OPENROUTER_EMBEDDING_MODEL:-openai/text-embedding-3-small}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-http://localhost}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Pieuvre Auto}
+      RAG_MOCK_MODE: ${RAG_MOCK_MODE:-false}
+      # OCR / Vision
+      VISION_PROVIDER: ${VISION_PROVIDER:-openai}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      VISION_MODEL: ${VISION_MODEL:-gpt-4o-mini}
+      VISION_API_BASE: ${VISION_API_BASE:-https://api.openai.com/v1}
+      VISION_MOCK_MODE: ${VISION_MOCK_MODE:-false}
+      OCR_SERVICE_URL: http://ocr:3002
     depends_on:
       postgres:
         condition: service_healthy
     ports:
       - "${API_PORT:-3001}:3001"
+    volumes:
+      - uploads_data:/app/uploads
+    networks:
+      - pieuvre-network
+
+  # ====================================================================
+  # OCR Service
+  # ====================================================================
+  ocr:
+    build:
+      context: .
+      dockerfile: pieuvre-ocr/Dockerfile
+    container_name: pieuvre-ocr
+    restart: unless-stopped
+    environment:
+      PORT: 3002
+      NODE_ENV: production
+      VISION_PROVIDER: ${VISION_PROVIDER:-openai}
+      VISION_API_KEY: ${VISION_API_KEY:-}
+      VISION_MODEL: ${VISION_MODEL:-gpt-4o-mini}
+      VISION_API_BASE: ${VISION_API_BASE:-https://api.openai.com/v1}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_SITE_URL: ${OPENROUTER_SITE_URL:-http://localhost}
+      OPENROUTER_APP_NAME: ${OPENROUTER_APP_NAME:-Pieuvre Auto}
+      VISION_MOCK_MODE: ${VISION_MOCK_MODE:-false}
+    ports:
+      - "3002:3002"
+    volumes:
+      - uploads_data:/app/uploads:ro
     networks:
       - pieuvre-network
 
@@ -118,4 +164,6 @@ networks:
 # ====================================================================
 volumes:
   postgres_data:
+    driver: local
+  uploads_data:
     driver: local
